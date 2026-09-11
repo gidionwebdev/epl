@@ -1,0 +1,6 @@
+{
+  "name": "Premier League Match Scraper",
+  "description": "Premier League fixtures, scores, venues, and played results across all 35 seasons from 1992-93 to date.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
