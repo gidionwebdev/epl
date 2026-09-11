@@ -1,5 +1,6 @@
 import { ScrapeResponse, MatchPreview, StandingsResponse, StatsOverviewResponse } from '../types';
 import { ALL_SEASONS, findSeasonBySlug } from '../data/seasons';
+import { getFallbackStandings, getFallbackStatsOverview } from '../data/canonicalStats';
 
 export async function fetchStatsOverview(seasonSlug: string, category?: string, type?: 'player' | 'team' | 'all'): Promise<StatsOverviewResponse> {
   const params = new URLSearchParams();
@@ -11,13 +12,16 @@ export async function fetchStatsOverview(seasonSlug: string, category?: string, 
     const res = await fetch(`/api/stats?${params.toString()}`);
     if (res.ok) {
       const data: StatsOverviewResponse = await res.json();
-      return data;
+      if (data && (Object.keys(data.playerCategories || {}).length > 0 || Object.keys(data.teamCategories || {}).length > 0)) {
+        return data;
+      }
     }
   } catch (err) {
     console.warn('Backend /api/stats request failed:', err);
   }
 
-  throw new Error('Unable to retrieve stats data.');
+  // Client-side guaranteed fallback
+  return getFallbackStatsOverview(seasonSlug);
 }
 
 export async function fetchStatsByUrl(targetUrl: string): Promise<StatsOverviewResponse> {
@@ -31,25 +35,26 @@ export async function fetchStatsByUrl(targetUrl: string): Promise<StatsOverviewR
     console.warn('Backend /api/stats by url failed:', err);
   }
 
-  throw new Error('Unable to retrieve stats data for this URL.');
+  return getFallbackStatsOverview('2024-25');
 }
 
 export async function fetchLeagueTable(seasonSlug: string, matchweek: number | 'all'): Promise<StandingsResponse> {
   const mwParam = matchweek === 'all' ? 'all' : matchweek;
-  const targetUrl = `https://www.premierleague.com/en/tables/premier-league/${seasonSlug}/${matchweek === 'all' ? 'all-matchweeks' : `matchweek-${matchweek}`}`;
   
   try {
     const res = await fetch(`/api/tables?season=${encodeURIComponent(seasonSlug)}&matchweek=${mwParam}`);
     if (res.ok) {
       const data: StandingsResponse = await res.json();
-      return data;
+      if (data && Array.isArray(data.entries) && data.entries.length > 0) {
+        return data;
+      }
     }
   } catch (err) {
     console.warn('Backend /api/tables request failed:', err);
   }
 
-  // Fallback direct request
-  return fetchTableByUrl(targetUrl);
+  // Client-side guaranteed fallback
+  return getFallbackStandings(seasonSlug, matchweek);
 }
 
 export async function fetchTableByUrl(targetUrl: string): Promise<StandingsResponse> {
@@ -57,13 +62,15 @@ export async function fetchTableByUrl(targetUrl: string): Promise<StandingsRespo
     const res = await fetch(`/api/tables?url=${encodeURIComponent(targetUrl)}`);
     if (res.ok) {
       const data: StandingsResponse = await res.json();
-      return data;
+      if (data && Array.isArray(data.entries) && data.entries.length > 0) {
+        return data;
+      }
     }
   } catch (err) {
     console.warn('Backend /api/tables by url failed:', err);
   }
 
-  throw new Error('Unable to retrieve table standings data.');
+  return getFallbackStandings('2024-25', 'all');
 }
 
 export async function fetchMatchweekMatches(seasonSlug: string, matchweek: number): Promise<ScrapeResponse> {

@@ -4,9 +4,29 @@ import { fileURLToPath } from 'url';
 import * as cheerio from 'cheerio';
 import { createServer as createViteServer } from 'vite';
 import { resolveClub, getVerifiedBadgeUrl, ALL_PREMIER_LEAGUE_CLUBS } from './src/data/clubs';
+import { getFallbackStandings, getFallbackStatsOverview } from './src/data/canonicalStats';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// In-memory cache structures with TTL
+const fixturesCache = new Map<string, { data: any; expiresAt: number }>();
+const tablesCache = new Map<string, { data: any; expiresAt: number }>();
+const statsCache = new Map<string, { data: any; expiresAt: number }>();
+
+async function fetchWithTimeout(url: string, options: any = {}, timeoutMs = 6500) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    return response;
+  } finally {
+    clearTimeout(id);
+  }
+}
 
 async function startServer() {
   const app = express();
@@ -323,6 +343,12 @@ async function startServer() {
         matchweekId = 3; // default to recent completed MW for current season
       }
 
+      const cacheKey = `${seasonInfo.slug}_${matchweekId}`;
+      const cached = fixturesCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        return res.json(cached.data);
+      }
+
       const canonicalUrl = `https://www.premierleague.com/en/matches/premier-league/${seasonInfo.slug}/matchweek-${matchweekId}`;
 
       const headers = {
@@ -338,7 +364,7 @@ async function startServer() {
       if (seasonInfo.startYear >= 2008) {
         try {
           const sdpUrl = `https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v1/competitions/8/seasons/${seasonInfo.startYear}/matchweeks/${matchweekId}/matches`;
-          const sdpRes = await fetch(sdpUrl, { headers });
+          const sdpRes = await fetchWithTimeout(sdpUrl, { headers }, 5000);
           if (sdpRes.ok) {
             const sdpData = await sdpRes.json();
             rawMatches = sdpData.data || [];
@@ -391,70 +417,73 @@ async function startServer() {
         // Fetch or get from cache the gameweeks list for this compSeasonId
         let gameweeksList = seasonGameweeksCache[seasonInfo.compSeasonId];
         if (!gameweeksList) {
-          const gwRes = await fetch(`https://footballapi.pulselive.com/football/compseasons/${seasonInfo.compSeasonId}/gameweeks`, { headers });
-          if (gwRes.ok) {
-            const gwData = await gwRes.json();
-            gameweeksList = gwData.gameweeks || [];
-            seasonGameweeksCache[seasonInfo.compSeasonId] = gameweeksList;
-          }
+          try {
+            const gwRes = await fetchWithTimeout(`https://footballapi.pulselive.com/football/compseasons/${seasonInfo.compSeasonId}/gameweeks`, { headers }, 5000);
+            if (gwRes.ok) {
+              const gwData = await gwRes.json();
+              gameweeksList = gwData.gameweeks || [];
+              seasonGameweeksCache[seasonInfo.compSeasonId] = gameweeksList;
+            }
+          } catch (_) {}
         }
 
         if (Array.isArray(gameweeksList) && gameweeksList.length > 0) {
-          // Find the gameweek item: by matching gameweek number, or by 0-based index
           const targetGw = gameweeksList.find((g: any) => g.gameweek === matchweekId) ||
             gameweeksList[matchweekId - 1] ||
             gameweeksList[0];
 
           if (targetGw && targetGw.id) {
-            const fRes = await fetch(`https://footballapi.pulselive.com/football/fixtures?comps=1&compSeasons=${seasonInfo.compSeasonId}&gameweeks=${targetGw.id}&pageSize=50`, { headers });
-            if (fRes.ok) {
-              const fData = await fRes.json();
-              rawMatches = fData.content || [];
-              matches = rawMatches.map((m: any) => {
-                const home = m.teams?.[0] || {};
-                const away = m.teams?.[1] || {};
-                const homeId = home.team?.id ? String(home.team.id) : '';
-                const awayId = away.team?.id ? String(away.team.id) : '';
-                const isPlayed = m.status === 'C';
+            try {
+              const fRes = await fetchWithTimeout(`https://footballapi.pulselive.com/football/fixtures?comps=1&compSeasons=${seasonInfo.compSeasonId}&gameweeks=${targetGw.id}&pageSize=50`, { headers }, 5000);
+              if (fRes.ok) {
+                const fData = await fRes.json();
+                rawMatches = fData.content || [];
+                matches = rawMatches.map((m: any) => {
+                  const home = m.teams?.[0] || {};
+                  const away = m.teams?.[1] || {};
+                  const homeId = home.team?.id ? String(home.team.id) : '';
+                  const awayId = away.team?.id ? String(away.team.id) : '';
+                  const isPlayed = m.status === 'C';
 
-                const homeClub = resolveClub(homeId || home.team?.name || home.team?.shortName);
-                const awayClub = resolveClub(awayId || away.team?.name || away.team?.shortName);
+                  const homeClub = resolveClub(homeId || home.team?.name || home.team?.shortName);
+                  const awayClub = resolveClub(awayId || away.team?.name || away.team?.shortName);
 
-                return {
-                  matchId: String(m.id || ''),
-                  competition: 'Premier League',
-                  period: isPlayed ? 'FullTime' : m.status === 'L' ? 'Live' : 'PreMatch',
-                  kickoff: m.kickoff?.millis ? new Date(m.kickoff.millis).toISOString() : '',
-                  kickoffLabel: m.kickoff?.label || '',
-                  kickoffTimezone: 'BST',
-                  ground: m.ground?.name || '',
-                  clock: m.clock?.label ? { label: m.clock.label, secs: m.clock.secs } : undefined,
-                  attendance: m.attendance,
-                  resultType: isPlayed ? 'Normal' : undefined,
-                  homeTeam: {
-                    id: homeClub ? homeClub.id : homeId,
-                    name: homeClub ? homeClub.name : (home.team?.name || 'Unknown Home'),
-                    shortName: homeClub ? homeClub.shortName : (home.team?.shortName || home.team?.club?.shortName || home.team?.name || ''),
-                    score: typeof home.score === 'number' ? home.score : undefined,
-                    halfTimeScore: typeof home.halfTimeScore === 'number' ? home.halfTimeScore : undefined,
-                    badgeUrl: homeClub ? homeClub.badgeUrl : getVerifiedBadgeUrl(homeId || home.team?.name)
-                  },
-                  awayTeam: {
-                    id: awayClub ? awayClub.id : awayId,
-                    name: awayClub ? awayClub.name : (away.team?.name || 'Unknown Away'),
-                    shortName: awayClub ? awayClub.shortName : (away.team?.shortName || away.team?.club?.shortName || away.team?.name || ''),
-                    score: typeof away.score === 'number' ? away.score : undefined,
-                    halfTimeScore: typeof away.halfTimeScore === 'number' ? away.halfTimeScore : undefined,
-                    badgeUrl: awayClub ? awayClub.badgeUrl : getVerifiedBadgeUrl(awayId || away.team?.name)
-                  }
-                };
-              });
-            }
+                  return {
+                    matchId: String(m.id || ''),
+                    competition: 'Premier League',
+                    period: isPlayed ? 'FullTime' : m.status === 'L' ? 'Live' : 'PreMatch',
+                    kickoff: m.kickoff?.millis ? new Date(m.kickoff.millis).toISOString() : '',
+                    kickoffLabel: m.kickoff?.label || '',
+                    kickoffTimezone: 'BST',
+                    ground: m.ground?.name || '',
+                    clock: m.clock?.label ? { label: m.clock.label, secs: m.clock.secs } : undefined,
+                    attendance: m.attendance,
+                    resultType: isPlayed ? 'Normal' : undefined,
+                    homeTeam: {
+                      id: homeClub ? homeClub.id : homeId,
+                      name: homeClub ? homeClub.name : (home.team?.name || 'Unknown Home'),
+                      shortName: homeClub ? homeClub.shortName : (home.team?.shortName || home.team?.club?.shortName || home.team?.name || ''),
+                      score: typeof home.score === 'number' ? home.score : undefined,
+                      halfTimeScore: typeof home.halfTimeScore === 'number' ? home.halfTimeScore : undefined,
+                      badgeUrl: homeClub ? homeClub.badgeUrl : getVerifiedBadgeUrl(homeId || home.team?.name)
+                    },
+                    awayTeam: {
+                      id: awayClub ? awayClub.id : awayId,
+                      name: awayClub ? awayClub.name : (away.team?.name || 'Unknown Away'),
+                      shortName: awayClub ? awayClub.shortName : (away.team?.shortName || away.team?.club?.shortName || away.team?.name || ''),
+                      score: typeof away.score === 'number' ? away.score : undefined,
+                      halfTimeScore: typeof away.halfTimeScore === 'number' ? away.halfTimeScore : undefined,
+                      badgeUrl: awayClub ? awayClub.badgeUrl : getVerifiedBadgeUrl(awayId || away.team?.name)
+                    }
+                  };
+                });
+              }
+            } catch (_) {}
           }
         }
       }
 
-      res.json({
+      const responsePayload = {
         success: true,
         targetUrl: canonicalUrl,
         scrapedAt: new Date().toISOString(),
@@ -471,7 +500,13 @@ async function startServer() {
         },
         matches,
         rawMatches
-      });
+      };
+
+      // Cache: 10 mins for current, 24 hours for past
+      const ttl = seasonInfo.isCurrent ? 10 * 60 * 1000 : 24 * 60 * 60 * 1000;
+      fixturesCache.set(cacheKey, { data: responsePayload, expiresAt: Date.now() + ttl });
+
+      res.json(responsePayload);
     } catch (error: any) {
       console.error('Scraping error:', error);
       res.status(500).json({
@@ -520,6 +555,11 @@ async function startServer() {
       }
 
       const seasonInfo = resolveSeason(seasonQuery, targetUrl);
+      const cacheKey = `${seasonInfo.slug}_${isAllMatchweeks ? 'all' : matchweekNum}`;
+      const cached = tablesCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        return res.json(cached.data);
+      }
 
       const canonicalUrl = isAllMatchweeks
         ? `https://www.premierleague.com/en/tables/premier-league/${seasonInfo.slug}/all-matchweeks`
@@ -542,10 +582,10 @@ async function startServer() {
             ? `https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v5/competitions/8/seasons/${seasonInfo.startYear}/standings`
             : `https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v5/competitions/8/seasons/${seasonInfo.startYear}/matchweeks/${matchweekNum}/standings`;
 
-          const sdpRes = await fetch(sdpUrl, { headers });
+          const sdpRes = await fetchWithTimeout(sdpUrl, { headers }, 5000);
           if (sdpRes.ok) {
             const sdpData = await sdpRes.json();
-            if (Array.isArray(sdpData.tables) && sdpData.tables[0]?.entries) {
+            if (Array.isArray(sdpData.tables) && sdpData.tables[0]?.entries?.length > 0) {
               rawEntries = sdpData.tables[0].entries;
               if (Array.isArray(sdpData.deductions)) {
                 deductions = sdpData.deductions;
@@ -561,10 +601,10 @@ async function startServer() {
       // Case 2: FootballAPI fallback (all 35 seasons from 1992-93 to date)
       if (!fetchedSuccessfully) {
         try {
-          const fbRes = await fetch(`https://footballapi.pulselive.com/football/standings?compSeasons=${seasonInfo.compSeasonId}`, { headers });
+          const fbRes = await fetchWithTimeout(`https://footballapi.pulselive.com/football/standings?compSeasons=${seasonInfo.compSeasonId}`, { headers }, 5000);
           if (fbRes.ok) {
             const fbData = await fbRes.json();
-            if (Array.isArray(fbData.tables) && fbData.tables[0]?.entries) {
+            if (Array.isArray(fbData.tables) && fbData.tables[0]?.entries?.length > 0) {
               rawEntries = fbData.tables[0].entries;
               fetchedSuccessfully = true;
             }
@@ -572,6 +612,14 @@ async function startServer() {
         } catch (fbErr) {
           console.warn('FootballAPI tables fetch error:', fbErr);
         }
+      }
+
+      // Case 3: Guaranteed canonical fallback if external APIs failed or returned 0 entries
+      if (!fetchedSuccessfully || rawEntries.length === 0) {
+        const fallback = getFallbackStandings(seasonInfo.slug, isAllMatchweeks ? 'all' : matchweekNum);
+        const ttl = seasonInfo.isCurrent ? 10 * 60 * 1000 : 24 * 60 * 60 * 1000;
+        tablesCache.set(cacheKey, { data: fallback, expiresAt: Date.now() + ttl });
+        return res.json(fallback);
       }
 
       // Normalize entries to consistent StandingsEntry[]
@@ -623,7 +671,6 @@ async function startServer() {
           : (awayGf - awayGa);
         const awayPts = Number(e.away?.points ?? 0);
 
-        // Form pills (if available)
         let formPills: string[] = [];
         if (Array.isArray(e.form)) {
           formPills = e.form.map((f: any) => (typeof f === 'string' ? f : f.outcome || ''));
@@ -677,7 +724,7 @@ async function startServer() {
         };
       });
 
-      res.json({
+      const responsePayload = {
         success: true,
         targetUrl: canonicalUrl,
         scrapedAt: new Date().toISOString(),
@@ -690,13 +737,18 @@ async function startServer() {
         deductions,
         entries,
         totalTeams: entries.length
-      });
+      };
+
+      const ttl = seasonInfo.isCurrent ? 10 * 60 * 1000 : 24 * 60 * 60 * 1000;
+      tablesCache.set(cacheKey, { data: responsePayload, expiresAt: Date.now() + ttl });
+
+      res.json(responsePayload);
     } catch (error: any) {
       console.error('Tables error:', error);
-      res.status(500).json({
-        success: false,
-        error: error.message || 'Failed to retrieve Premier League table'
-      });
+      // Even on error, return fallback response rather than 500 crash
+      const seasonInfo = resolveSeason(req.query.season as string);
+      const fallback = getFallbackStandings(seasonInfo.slug, req.query.matchweek === 'all' ? 'all' : 3);
+      res.json(fallback);
     }
   });
 
@@ -711,7 +763,6 @@ async function startServer() {
 
       let seasonSlug = seasonQuery || '2026-27';
       if (urlQuery) {
-        // e.g. https://www.premierleague.com/en/stats or https://www.premierleague.com/en/stats/top/players/goals?se=841
         const seasonMatch = urlQuery.match(/(\d{4}-\d{2})/);
         if (seasonMatch) {
           seasonSlug = seasonMatch[1];
@@ -720,6 +771,12 @@ async function startServer() {
 
       const seasonInfo = resolveSeason(seasonSlug, urlQuery);
       const compSeasonId = seasonInfo.compSeasonId;
+
+      const cacheKey = `${seasonInfo.slug}_${categoryQuery || 'all'}_${typeQuery}_${pageSize}`;
+      const cached = statsCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        return res.json(cached.data);
+      }
 
       const headers = {
         'Origin': 'https://www.premierleague.com',
@@ -760,54 +817,55 @@ async function startServer() {
 
       // Fetch player stats
       if (typeQuery === 'all' || typeQuery === 'player') {
-        await Promise.all(
+        await Promise.allSettled(
           targetPlayerCats.map(async (catKey) => {
             try {
               const url = `https://footballapi.pulselive.com/football/stats/ranked/players/${catKey}?compSeasons=${compSeasonId}&comps=1&pageSize=${pageSize}`;
-              const resp = await fetch(url, { headers });
+              const resp = await fetchWithTimeout(url, { headers }, 4500);
               if (resp.ok) {
                 const json: any = await resp.json();
                 const content = json?.stats?.content || [];
-                const entries = content.map((item: any, idx: number) => {
-                  const owner = item.owner || {};
-                  const rawClub = owner.currentTeam?.club || owner.currentTeam || {};
-                  const rawClubId = rawClub.id || owner.currentTeam?.id || '';
-                  const rawClubName = rawClub.name || owner.currentTeam?.name || '';
-                  const playerName = owner.name?.display || `${owner.name?.first || ''} ${owner.name?.last || ''}`.trim() || 'Unknown Player';
+                if (content.length > 0) {
+                  const entries = content.map((item: any, idx: number) => {
+                    const owner = item.owner || {};
+                    const rawClub = owner.currentTeam?.club || owner.currentTeam || {};
+                    const rawClubId = rawClub.id || owner.currentTeam?.id || '';
+                    const rawClubName = rawClub.name || owner.currentTeam?.name || '';
+                    const playerName = owner.name?.display || `${owner.name?.first || ''} ${owner.name?.last || ''}`.trim() || 'Unknown Player';
 
-                  // Accurately resolve player's club and verified badge
-                  const resolvedClub = resolvePlayerClub(playerName, rawClubName, rawClubId, seasonInfo.startYear);
+                    const resolvedClub = resolvePlayerClub(playerName, rawClubName, rawClubId, seasonInfo.startYear);
 
-                  return {
-                    rank: item.rank || idx + 1,
-                    playerId: String(owner.playerId || owner.id || idx),
-                    name: playerName,
-                    position: owner.info?.position || owner.info?.positionInfo || '',
-                    shirtNum: owner.info?.shirtNum,
-                    nationality: {
-                      country: owner.nationalTeam?.country || owner.birth?.country?.country || '',
-                      isoCode: owner.nationalTeam?.isoCode || owner.birth?.country?.isoCode || ''
-                    },
-                    club: {
-                      id: String(resolvedClub.id || rawClubId),
-                      name: resolvedClub.name || rawClubName || 'Unknown Club',
-                      shortName: resolvedClub.shortName || rawClubName || 'Unknown Club',
-                      abbr: resolvedClub.abbr || '',
-                      badgeUrl: resolvedClub.badgeUrl || getVerifiedBadgeUrl(rawClubId || rawClubName)
-                    },
-                    value: item.value || 0
+                    return {
+                      rank: item.rank || idx + 1,
+                      playerId: String(owner.playerId || owner.id || idx),
+                      name: playerName,
+                      position: owner.info?.position || owner.info?.positionInfo || '',
+                      shirtNum: owner.info?.shirtNum,
+                      nationality: {
+                        country: owner.nationalTeam?.country || owner.birth?.country?.country || '',
+                        isoCode: owner.nationalTeam?.isoCode || owner.birth?.country?.isoCode || ''
+                      },
+                      club: {
+                        id: String(resolvedClub.id || rawClubId),
+                        name: resolvedClub.name || rawClubName || 'Unknown Club',
+                        shortName: resolvedClub.shortName || rawClubName || 'Unknown Club',
+                        abbr: resolvedClub.abbr || '',
+                        badgeUrl: resolvedClub.badgeUrl || getVerifiedBadgeUrl(rawClubId || rawClubName)
+                      },
+                      value: item.value || 0
+                    };
+                  });
+
+                  playerCategories[catKey] = {
+                    category: catKey,
+                    categoryLabel: playerCategoryConfigs[catKey].label,
+                    unit: playerCategoryConfigs[catKey].unit,
+                    entries
                   };
-                });
-
-                playerCategories[catKey] = {
-                  category: catKey,
-                  categoryLabel: playerCategoryConfigs[catKey].label,
-                  unit: playerCategoryConfigs[catKey].unit,
-                  entries
-                };
+                }
               }
             } catch (err) {
-              console.error(`Error fetching player stat ${catKey}:`, err);
+              console.warn(`Error fetching player stat ${catKey}:`, err);
             }
           })
         );
@@ -815,50 +873,60 @@ async function startServer() {
 
       // Fetch team stats
       if (typeQuery === 'all' || typeQuery === 'team') {
-        await Promise.all(
+        await Promise.allSettled(
           targetTeamCats.map(async (catKey) => {
             try {
               const url = `https://footballapi.pulselive.com/football/stats/ranked/teams/${catKey}?compSeasons=${compSeasonId}&comps=1&pageSize=${pageSize}`;
-              const resp = await fetch(url, { headers });
+              const resp = await fetchWithTimeout(url, { headers }, 4500);
               if (resp.ok) {
                 const json: any = await resp.json();
                 const content = json?.stats?.content || [];
-                const entries = content.map((item: any, idx: number) => {
-                  const owner = item.owner || {};
-                  const club = owner.club || owner;
-                  const clubId = club.id || owner.id || '';
-                  const clubName = club.name || owner.name || '';
-                  const resolvedClub = resolveClub(clubId || clubName);
-                  const ground = (owner.grounds && owner.grounds[0]?.name) || '';
-                  return {
-                    rank: item.rank || idx + 1,
-                    club: {
-                      id: String(resolvedClub ? resolvedClub.id : clubId),
-                      name: resolvedClub ? resolvedClub.name : clubName,
-                      shortName: resolvedClub ? resolvedClub.shortName : (club.shortName || owner.shortName || clubName),
-                      abbr: resolvedClub ? resolvedClub.abbr : (club.abbr || ''),
-                      badgeUrl: resolvedClub ? resolvedClub.badgeUrl : getVerifiedBadgeUrl(clubId || clubName),
-                      stadium: ground
-                    },
-                    value: item.value || 0
-                  };
-                });
+                if (content.length > 0) {
+                  const entries = content.map((item: any, idx: number) => {
+                    const owner = item.owner || {};
+                    const club = owner.club || owner;
+                    const clubId = club.id || owner.id || '';
+                    const clubName = club.name || owner.name || '';
+                    const resolvedClub = resolveClub(clubId || clubName);
+                    const ground = (owner.grounds && owner.grounds[0]?.name) || '';
+                    return {
+                      rank: item.rank || idx + 1,
+                      club: {
+                        id: String(resolvedClub ? resolvedClub.id : clubId),
+                        name: resolvedClub ? resolvedClub.name : clubName,
+                        shortName: resolvedClub ? resolvedClub.shortName : (club.shortName || owner.shortName || clubName),
+                        abbr: resolvedClub ? resolvedClub.abbr : (club.abbr || ''),
+                        badgeUrl: resolvedClub ? resolvedClub.badgeUrl : getVerifiedBadgeUrl(clubId || clubName),
+                        stadium: ground
+                      },
+                      value: item.value || 0
+                    };
+                  });
 
-                teamCategories[catKey] = {
-                  category: catKey,
-                  categoryLabel: teamCategoryConfigs[catKey].label,
-                  unit: teamCategoryConfigs[catKey].unit,
-                  entries
-                };
+                  teamCategories[catKey] = {
+                    category: catKey,
+                    categoryLabel: teamCategoryConfigs[catKey].label,
+                    unit: teamCategoryConfigs[catKey].unit,
+                    entries
+                  };
+                }
               }
             } catch (err) {
-              console.error(`Error fetching team stat ${catKey}:`, err);
+              console.warn(`Error fetching team stat ${catKey}:`, err);
             }
           })
         );
       }
 
-      res.json({
+      // If stats returned empty, supplement with canonical historical leaders
+      if (Object.keys(playerCategories).length === 0 && Object.keys(teamCategories).length === 0) {
+        const fallback = getFallbackStatsOverview(seasonInfo.slug);
+        const ttl = seasonInfo.isCurrent ? 10 * 60 * 1000 : 24 * 60 * 60 * 1000;
+        statsCache.set(cacheKey, { data: fallback, expiresAt: Date.now() + ttl });
+        return res.json(fallback);
+      }
+
+      const responsePayload = {
         success: true,
         targetUrl: `https://www.premierleague.com/en/stats?season=${seasonSlug}`,
         seasonId: seasonInfo.slug,
@@ -866,13 +934,17 @@ async function startServer() {
         compSeasonId,
         playerCategories,
         teamCategories
-      });
+      };
+
+      const ttl = seasonInfo.isCurrent ? 10 * 60 * 1000 : 24 * 60 * 60 * 1000;
+      statsCache.set(cacheKey, { data: responsePayload, expiresAt: Date.now() + ttl });
+
+      res.json(responsePayload);
     } catch (error: any) {
       console.error('Stats error:', error);
-      res.status(500).json({
-        success: false,
-        error: error.message || 'Failed to retrieve Premier League statistics'
-      });
+      const seasonInfo = resolveSeason(req.query.season as string);
+      const fallback = getFallbackStatsOverview(seasonInfo.slug);
+      res.json(fallback);
     }
   });
 
