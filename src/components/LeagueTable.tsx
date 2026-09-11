@@ -318,7 +318,7 @@ export const LeagueTable: React.FC<LeagueTableProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {loading ? (
+              {loading || !tableData ? (
                 <tr>
                   <td colSpan={12} className="py-16 text-center text-slate-500">
                     <div className="inline-flex items-center gap-3">
@@ -330,7 +330,34 @@ export const LeagueTable: React.FC<LeagueTableProps> = ({
               ) : filteredEntries.length === 0 ? (
                 <tr>
                   <td colSpan={12} className="py-12 text-center text-slate-500 text-sm">
-                    No clubs matching &quot;{searchTerm}&quot; found.
+                    {searchTerm.trim() ? (
+                      <div className="flex flex-col items-center justify-center gap-2">
+                        <span>No clubs matching &quot;{searchTerm}&quot; found.</span>
+                        <button
+                          type="button"
+                          onClick={() => setSearchTerm('')}
+                          className="text-xs text-[#38003c] font-bold hover:underline cursor-pointer"
+                        >
+                          Clear search filter
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center gap-2 py-4">
+                        <AlertCircle className="w-5 h-5 text-slate-400" />
+                        <span className="font-semibold text-slate-700">No standings data available</span>
+                        <p className="text-xs text-slate-500 max-w-sm">
+                          Unable to find table entries for the selected matchweek or season.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={onRefresh}
+                          className="mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#38003c] text-white text-xs font-semibold hover:bg-[#29002c] transition cursor-pointer"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          <span>Reload Standings</span>
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ) : (

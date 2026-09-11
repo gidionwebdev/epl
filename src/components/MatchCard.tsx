@@ -1,7 +1,9 @@
-import React from 'react';
-import { MapPin, Clock, History, Calendar, Shield, Users, Trophy } from 'lucide-react';
-import { MatchFixture } from '../types';
+import React, { useState, useEffect } from 'react';
+import { MapPin, Clock, History, Calendar, Users, Trophy, TrendingUp, Sparkles } from 'lucide-react';
+import { MatchFixture, PreviousMeeting } from '../types';
 import { ClubBadge } from './ClubBadge';
+import { fetchMatchPreview } from '../services/scraper';
+import { calculateWinProbability, WinProbabilityResult } from '../utils/winProbability';
 
 interface MatchCardProps {
   match: MatchFixture;
@@ -9,12 +11,59 @@ interface MatchCardProps {
   onSelectMatch: (match: MatchFixture) => void;
 }
 
+// Module-level in-memory cache for fast H2H retrieval across renders
+const h2hPreviewCache = new Map<string, PreviousMeeting[]>();
+
 export const MatchCard: React.FC<MatchCardProps> = ({ match, index, onSelectMatch }) => {
   const hasScore = typeof match.homeTeam.score === 'number' && typeof match.awayTeam.score === 'number';
   const isFinished = match.period === 'FullTime' || hasScore;
   const isHomeWinner = hasScore && (match.homeTeam.score as number) > (match.awayTeam.score as number);
   const isAwayWinner = hasScore && (match.awayTeam.score as number) > (match.homeTeam.score as number);
   const isDraw = hasScore && (match.homeTeam.score as number) === (match.awayTeam.score as number);
+
+  // Win Probability calculation state for upcoming fixtures
+  const [winProb, setWinProb] = useState<WinProbabilityResult>(() =>
+    calculateWinProbability(
+      match.homeTeam,
+      match.awayTeam,
+      h2hPreviewCache.get(match.matchId) || []
+    )
+  );
+  const [loadingH2H, setLoadingH2H] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (isFinished) return;
+
+    // If already in cache, calculate and return
+    if (h2hPreviewCache.has(match.matchId)) {
+      const cached = h2hPreviewCache.get(match.matchId)!;
+      setWinProb(calculateWinProbability(match.homeTeam, match.awayTeam, cached));
+      return;
+    }
+
+    let isMounted = true;
+    setLoadingH2H(true);
+
+    fetchMatchPreview(match.matchId)
+      .then((data) => {
+        if (!isMounted) return;
+        const meetings = data?.previousMeetings || [];
+        h2hPreviewCache.set(match.matchId, meetings);
+        setWinProb(calculateWinProbability(match.homeTeam, match.awayTeam, meetings));
+        setLoadingH2H(false);
+      })
+      .catch((err) => {
+        console.warn('H2H win probability preview failed for match', match.matchId, err);
+        if (isMounted) {
+          setWinProb(calculateWinProbability(match.homeTeam, match.awayTeam, []));
+          setLoadingH2H(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [match.matchId, match.homeTeam, match.awayTeam, isFinished]);
 
   // Format kick-off date
   const formatKickoff = (dateStr: string, tz: string) => {
@@ -191,6 +240,74 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, index, onSelectMatc
             </div>
           </div>
         </div>
+
+        {/* Win Probability Visualizer (Upcoming Matches) */}
+        {!isFinished && (
+          <div className="mt-4 pt-3 border-t border-slate-100">
+            {/* Probability Percentages & Labels */}
+            <div className="flex items-center justify-between text-xs font-bold mb-1.5">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="w-2 h-2 rounded-full bg-[#38003c] shrink-0"></span>
+                <span className="text-slate-800 truncate max-w-[85px] sm:max-w-[105px]">
+                  {match.homeTeam.shortName || match.homeTeam.name}
+                </span>
+                <span className="font-mono text-xs text-[#38003c] font-black">
+                  {winProb.homeProb}%
+                </span>
+              </div>
+
+              <div className="flex items-center gap-1 px-1.5 shrink-0 text-slate-500 font-semibold text-[11px]">
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                <span>Draw</span>
+                <span className="font-mono">{winProb.drawProb}%</span>
+              </div>
+
+              <div className="flex items-center gap-1.5 min-w-0 justify-end">
+                <span className="font-mono text-xs text-emerald-700 font-black">
+                  {winProb.awayProb}%
+                </span>
+                <span className="text-slate-800 truncate max-w-[85px] sm:max-w-[105px] text-right">
+                  {match.awayTeam.shortName || match.awayTeam.name}
+                </span>
+                <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
+              </div>
+            </div>
+
+            {/* Segmented Progress Bar */}
+            <div
+              className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden flex shadow-2xs border border-slate-200/80"
+              title={`Win Probability: ${match.homeTeam.name} ${winProb.homeProb}% | Draw ${winProb.drawProb}% | ${match.awayTeam.name} ${winProb.awayProb}%`}
+            >
+              <div
+                className="bg-[#38003c] h-full transition-all duration-500 first:rounded-l-full"
+                style={{ width: `${winProb.homeProb}%` }}
+              />
+              <div
+                className="bg-slate-300 h-full transition-all duration-500 border-x border-white/60"
+                style={{ width: `${winProb.drawProb}%` }}
+              />
+              <div
+                className="bg-emerald-500 h-full transition-all duration-500 last:rounded-r-full"
+                style={{ width: `${winProb.awayProb}%` }}
+              />
+            </div>
+
+            {/* Subtext info */}
+            <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1 font-medium">
+              <span className="flex items-center gap-1 text-[#38003c] font-semibold">
+                <TrendingUp className="w-3 h-3 text-[#38003c]" />
+                <span>Win Probability</span>
+              </span>
+              <span className="truncate max-w-[180px] sm:max-w-[210px] text-right text-slate-500">
+                {loadingH2H
+                  ? 'Calculating H2H...'
+                  : winProb.totalMeetings > 0
+                  ? `${winProb.totalMeetings} past meetings (${winProb.homeWins}W · ${winProb.draws}D · ${winProb.awayWins}L)`
+                  : 'Historical matchup model'}
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Stadium & Location */}
         <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-600">

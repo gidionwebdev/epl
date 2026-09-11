@@ -372,8 +372,8 @@ async function startServer() {
               matches = rawMatches.map((m: any) => {
                 const homeId = m.homeTeam?.id ? String(m.homeTeam.id) : '';
                 const awayId = m.awayTeam?.id ? String(m.awayTeam.id) : '';
-                const homeClub = resolveClub(homeId || m.homeTeam?.name);
-                const awayClub = resolveClub(awayId || m.awayTeam?.name);
+                const homeClub = resolveClub(m.homeTeam?.name) || resolveClub(m.homeTeam?.shortName) || resolveClub(homeId);
+                const awayClub = resolveClub(m.awayTeam?.name) || resolveClub(m.awayTeam?.shortName) || resolveClub(awayId);
                 return {
                   matchId: String(m.matchId || ''),
                   competition: m.competition || 'Premier League',
@@ -445,8 +445,8 @@ async function startServer() {
                   const awayId = away.team?.id ? String(away.team.id) : '';
                   const isPlayed = m.status === 'C';
 
-                  const homeClub = resolveClub(homeId || home.team?.name || home.team?.shortName);
-                  const awayClub = resolveClub(awayId || away.team?.name || away.team?.shortName);
+                  const homeClub = resolveClub(home.team?.name) || resolveClub(home.team?.shortName) || resolveClub(homeId);
+                  const awayClub = resolveClub(away.team?.name) || resolveClub(away.team?.shortName) || resolveClub(awayId);
 
                   return {
                     matchId: String(m.id || ''),
@@ -676,7 +676,7 @@ async function startServer() {
           formPills = e.form.map((f: any) => (typeof f === 'string' ? f : f.outcome || ''));
         }
 
-        const resolvedClub = resolveClub(teamId || teamName || shortName);
+        const resolvedClub = resolveClub(teamName) || resolveClub(shortName) || resolveClub(teamId);
 
         return {
           position: pos,
@@ -887,7 +887,7 @@ async function startServer() {
                     const club = owner.club || owner;
                     const clubId = club.id || owner.id || '';
                     const clubName = club.name || owner.name || '';
-                    const resolvedClub = resolveClub(clubId || clubName);
+                    const resolvedClub = resolveClub(clubName) || resolveClub(clubId);
                     const ground = (owner.grounds && owner.grounds[0]?.name) || '';
                     return {
                       rank: item.rank || idx + 1,

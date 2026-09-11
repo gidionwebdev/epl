@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { X, Calendar, MapPin, Shield, RefreshCw, Trophy, Users, Award } from 'lucide-react';
+import { X, Calendar, MapPin, Shield, RefreshCw, Trophy, Users, Award, TrendingUp } from 'lucide-react';
 import { MatchFixture, MatchPreview } from '../types';
 import { fetchMatchPreview } from '../services/scraper';
 import { ClubBadge } from './ClubBadge';
+import { calculateWinProbability } from '../utils/winProbability';
 
 interface MatchDetailsModalProps {
   match: MatchFixture | null;
@@ -250,6 +251,60 @@ export const MatchDetailsModal: React.FC<MatchDetailsModalProps> = ({ match, onC
               </h3>
               <span className="text-xs text-slate-400">Premier League H2H record</span>
             </div>
+
+            {/* Win Probability Bar for upcoming matches in Modal */}
+            {!isFinished && previewData?.previousMeetings && (
+              (() => {
+                const prob = calculateWinProbability(match.homeTeam, match.awayTeam, previewData.previousMeetings);
+                return (
+                  <div className="mb-4 p-4 rounded-xl bg-slate-50 border border-slate-200">
+                    <div className="flex items-center justify-between text-xs font-bold mb-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-[#38003c]"></span>
+                        <span className="text-slate-800">{match.homeTeam.shortName || match.homeTeam.name}</span>
+                        <span className="font-mono text-[#38003c] font-black">{prob.homeProb}%</span>
+                      </div>
+                      <div className="flex items-center gap-1 text-slate-500 text-xs">
+                        <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+                        <span>Draw {prob.drawProb}%</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono text-emerald-700 font-black">{prob.awayProb}%</span>
+                        <span className="text-slate-800">{match.awayTeam.shortName || match.awayTeam.name}</span>
+                        <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                      </div>
+                    </div>
+
+                    <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden flex shadow-inner">
+                      <div
+                        className="bg-[#38003c] h-full transition-all duration-500 first:rounded-l-full"
+                        style={{ width: `${prob.homeProb}%` }}
+                      />
+                      <div
+                        className="bg-slate-300 h-full transition-all duration-500 border-x border-white/60"
+                        style={{ width: `${prob.drawProb}%` }}
+                      />
+                      <div
+                        className="bg-emerald-500 h-full transition-all duration-500 last:rounded-r-full"
+                        style={{ width: `${prob.awayProb}%` }}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] text-slate-500 mt-2">
+                      <span className="flex items-center gap-1 text-[#38003c] font-semibold">
+                        <TrendingUp className="w-3.5 h-3.5" />
+                        <span>Win Probability Projection</span>
+                      </span>
+                      <span>
+                        {prob.totalMeetings > 0
+                          ? `Calculated from ${prob.totalMeetings} past meetings (${prob.homeWins}W - ${prob.draws}D - ${prob.awayWins}L)`
+                          : 'Standard home/away baseline model'}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()
+            )}
 
             {loading ? (
               <div className="p-8 text-center bg-slate-50 rounded-xl border border-slate-100 flex flex-col items-center justify-center gap-2 text-slate-500 text-xs">

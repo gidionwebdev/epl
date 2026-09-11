@@ -33,12 +33,12 @@ export default function App() {
   // Table State
   const [tableData, setTableData] = useState<StandingsResponse | null>(null);
   const [tableMatchweek, setTableMatchweek] = useState<number | 'all'>(3);
-  const [tableLoading, setTableLoading] = useState<boolean>(false);
+  const [tableLoading, setTableLoading] = useState<boolean>(true);
   const [tableError, setTableError] = useState<string | null>(null);
 
   // Stats State
   const [statsData, setStatsData] = useState<StatsOverviewResponse | null>(null);
-  const [statsLoading, setStatsLoading] = useState<boolean>(false);
+  const [statsLoading, setStatsLoading] = useState<boolean>(true);
   const [statsError, setStatsError] = useState<string | null>(null);
 
   // Filter and view state for fixtures
@@ -400,7 +400,22 @@ export default function App() {
                   <>
                     {filteredMatches.length === 0 ? (
                       <div className="bg-white p-12 rounded-xl border border-slate-200 text-center text-slate-500 text-sm">
-                        No matches matched &quot;{searchQuery}&quot;. Try searching for another team or adjusting the status filter.
+                        {searchQuery.trim() ? (
+                          <div className="flex flex-col items-center justify-center gap-2">
+                            <span>No matches matching &quot;{searchQuery}&quot; found.</span>
+                            <button
+                              type="button"
+                              onClick={() => setSearchQuery('')}
+                              className="text-xs text-[#38003c] font-bold hover:underline cursor-pointer"
+                            >
+                              Clear search filter
+                            </button>
+                          </div>
+                        ) : statusFilter !== 'all' ? (
+                          <span>No {statusFilter === 'played' ? 'completed results' : 'upcoming fixtures'} for this matchweek.</span>
+                        ) : (
+                          <span>No matches found for this matchweek.</span>
+                        )}
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

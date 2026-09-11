@@ -468,7 +468,27 @@ export const PremierLeagueStats: React.FC<PremierLeagueStatsProps> = ({
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {filteredEntries.map((entry, idx) => {
+                          {filteredEntries.length === 0 ? (
+                            <tr>
+                              <td colSpan={scope === 'players' ? 6 : 4} className="py-12 text-center text-slate-500 text-sm">
+                                {searchQuery.trim() ? (
+                                  <div className="flex flex-col items-center justify-center gap-2">
+                                    <span>No entries matching &quot;{searchQuery}&quot; in this leaderboard.</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setSearchQuery('')}
+                                      className="text-xs text-[#38003c] font-bold hover:underline cursor-pointer"
+                                    >
+                                      Clear search filter
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span>No statistics recorded in this category.</span>
+                                )}
+                              </td>
+                            </tr>
+                          ) : (
+                            filteredEntries.map((entry, idx) => {
                             const pct = Math.round(((entry.value || 0) / maxValue) * 100);
 
                             return (
@@ -536,7 +556,7 @@ export const PremierLeagueStats: React.FC<PremierLeagueStatsProps> = ({
                                 </td>
                               </tr>
                             );
-                          })}
+                          }))}
                         </tbody>
                       </table>
                     </div>

@@ -10,7 +10,7 @@ export interface ClubData {
 
 export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
   {
-    id: '1',
+    id: '3',
     name: 'Arsenal',
     shortName: 'Arsenal',
     abbr: 'ARS',
@@ -19,7 +19,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#EF0107'
   },
   {
-    id: '2',
+    id: '7',
     name: 'Aston Villa',
     shortName: 'Aston Villa',
     abbr: 'AVL',
@@ -28,7 +28,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#670E36'
   },
   {
-    id: '3',
+    id: '101',
     name: 'Barnsley',
     shortName: 'Barnsley',
     abbr: 'BAR',
@@ -37,7 +37,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#BA0C2F'
   },
   {
-    id: '35',
+    id: '33',
     name: 'Birmingham City',
     shortName: 'Birmingham',
     abbr: 'BIR',
@@ -46,7 +46,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#0000FF'
   },
   {
-    id: '36',
+    id: '5',
     name: 'Blackburn Rovers',
     shortName: 'Blackburn',
     abbr: 'BLB',
@@ -55,7 +55,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#009EE0'
   },
   {
-    id: '37',
+    id: '96',
     name: 'Blackpool',
     shortName: 'Blackpool',
     abbr: 'BLP',
@@ -64,7 +64,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#F68B1F'
   },
   {
-    id: '27',
+    id: '30',
     name: 'Bolton Wanderers',
     shortName: 'Bolton',
     abbr: 'BOL',
@@ -73,7 +73,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#002B49'
   },
   {
-    id: '127',
+    id: '91',
     name: 'Bournemouth',
     shortName: 'Bournemouth',
     abbr: 'BOU',
@@ -82,7 +82,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#DA291C'
   },
   {
-    id: '39',
+    id: '85',
     name: 'Bradford City',
     shortName: 'Bradford',
     abbr: 'BRA',
@@ -91,7 +91,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#800000'
   },
   {
-    id: '130',
+    id: '94',
     name: 'Brentford',
     shortName: 'Brentford',
     abbr: 'BRE',
@@ -100,8 +100,8 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#E30613'
   },
   {
-    id: '131',
-    name: 'Brighton & Hove Albion',
+    id: '36',
+    name: 'Brighton and Hove Albion',
     shortName: 'Brighton',
     abbr: 'BHA',
     aliases: ['brighton and hove albion', 'brighton & hove albion', 'brighton', 'bha', 'seagulls'],
@@ -109,7 +109,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#0057B8'
   },
   {
-    id: '43',
+    id: '90',
     name: 'Burnley',
     shortName: 'Burnley',
     abbr: 'BUR',
@@ -118,7 +118,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#6C1D45'
   },
   {
-    id: '45',
+    id: '97',
     name: 'Cardiff City',
     shortName: 'Cardiff',
     abbr: 'CAR',
@@ -127,7 +127,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#0070B8'
   },
   {
-    id: '46',
+    id: '55',
     name: 'Charlton Athletic',
     shortName: 'Charlton',
     abbr: 'CHA',
@@ -136,7 +136,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#D31145'
   },
   {
-    id: '4',
+    id: '8',
     name: 'Chelsea',
     shortName: 'Chelsea',
     abbr: 'CHE',
@@ -145,7 +145,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#034694'
   },
   {
-    id: '5',
+    id: '51',
     name: 'Coventry City',
     shortName: 'Coventry',
     abbr: 'COV',
@@ -154,7 +154,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#00A3E0'
   },
   {
-    id: '6',
+    id: '31',
     name: 'Crystal Palace',
     shortName: 'Crystal Palace',
     abbr: 'CRY',
@@ -163,7 +163,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#1B458F'
   },
   {
-    id: '47',
+    id: '28',
     name: 'Derby County',
     shortName: 'Derby',
     abbr: 'DER',
@@ -172,7 +172,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#FFFFFF'
   },
   {
-    id: '7',
+    id: '11',
     name: 'Everton',
     shortName: 'Everton',
     abbr: 'EVE',
@@ -181,7 +181,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#003399'
   },
   {
-    id: '34',
+    id: '54',
     name: 'Fulham',
     shortName: 'Fulham',
     abbr: 'FUL',
@@ -190,7 +190,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#CC0000'
   },
   {
-    id: '49',
+    id: '38',
     name: 'Huddersfield Town',
     shortName: 'Huddersfield',
     abbr: 'HUD',
@@ -199,7 +199,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#0E63AD'
   },
   {
-    id: '41',
+    id: '88',
     name: 'Hull City',
     shortName: 'Hull',
     abbr: 'HUL',
@@ -208,7 +208,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#F5A800'
   },
   {
-    id: '8',
+    id: '40',
     name: 'Ipswich Town',
     shortName: 'Ipswich',
     abbr: 'IPS',
@@ -217,7 +217,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#004488'
   },
   {
-    id: '9',
+    id: '2',
     name: 'Leeds United',
     shortName: 'Leeds',
     abbr: 'LEE',
@@ -226,7 +226,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#FFCD00'
   },
   {
-    id: '26',
+    id: '13',
     name: 'Leicester City',
     shortName: 'Leicester',
     abbr: 'LEI',
@@ -235,7 +235,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#003090'
   },
   {
-    id: '10',
+    id: '14',
     name: 'Liverpool',
     shortName: 'Liverpool',
     abbr: 'LIV',
@@ -244,7 +244,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#C8102E'
   },
   {
-    id: '163',
+    id: '102',
     name: 'Luton Town',
     shortName: 'Luton',
     abbr: 'LUT',
@@ -253,7 +253,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#FF6600'
   },
   {
-    id: '11',
+    id: '43',
     name: 'Manchester City',
     shortName: 'Man City',
     abbr: 'MCI',
@@ -262,7 +262,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#6CABDD'
   },
   {
-    id: '12',
+    id: '1',
     name: 'Manchester United',
     shortName: 'Man Utd',
     abbr: 'MUN',
@@ -271,7 +271,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#DA291C'
   },
   {
-    id: '13',
+    id: '25',
     name: 'Middlesbrough',
     shortName: 'Middlesbrough',
     abbr: 'MID',
@@ -280,7 +280,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#D31145'
   },
   {
-    id: '23',
+    id: '4',
     name: 'Newcastle United',
     shortName: 'Newcastle',
     abbr: 'NEW',
@@ -289,7 +289,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#241F20'
   },
   {
-    id: '14',
+    id: '45',
     name: 'Norwich City',
     shortName: 'Norwich',
     abbr: 'NOR',
@@ -298,7 +298,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#FFF200'
   },
   {
-    id: '15',
+    id: '17',
     name: 'Nottingham Forest',
     shortName: "Nott'm Forest",
     abbr: 'NFO',
@@ -316,7 +316,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#002B49'
   },
   {
-    id: '51',
+    id: '47',
     name: 'Portsmouth',
     shortName: 'Portsmouth',
     abbr: 'POR',
@@ -325,7 +325,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#001489'
   },
   {
-    id: '17',
+    id: '52',
     name: 'Queens Park Rangers',
     shortName: 'QPR',
     abbr: 'QPR',
@@ -334,7 +334,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#1D428A'
   },
   {
-    id: '52',
+    id: '108',
     name: 'Reading',
     shortName: 'Reading',
     abbr: 'REA',
@@ -343,7 +343,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#004488'
   },
   {
-    id: '18',
+    id: '49',
     name: 'Sheffield United',
     shortName: 'Sheffield Utd',
     abbr: 'SHU',
@@ -370,7 +370,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#D71920'
   },
   {
-    id: '53',
+    id: '110',
     name: 'Stoke City',
     shortName: 'Stoke',
     abbr: 'STK',
@@ -379,7 +379,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#E03A3E'
   },
   {
-    id: '29',
+    id: '56',
     name: 'Sunderland',
     shortName: 'Sunderland',
     abbr: 'SUN',
@@ -388,7 +388,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#EB172B'
   },
   {
-    id: '54',
+    id: '80',
     name: 'Swansea City',
     shortName: 'Swansea',
     abbr: 'SWA',
@@ -397,7 +397,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#000000'
   },
   {
-    id: '55',
+    id: '105',
     name: 'Swindon Town',
     shortName: 'Swindon',
     abbr: 'SWI',
@@ -406,7 +406,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#D31145'
   },
   {
-    id: '21',
+    id: '6',
     name: 'Tottenham Hotspur',
     shortName: 'Spurs',
     abbr: 'TOT',
@@ -415,7 +415,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#132257'
   },
   {
-    id: '33',
+    id: '57',
     name: 'Watford',
     shortName: 'Watford',
     abbr: 'WAT',
@@ -424,7 +424,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#FBEE23'
   },
   {
-    id: '56',
+    id: '35',
     name: 'West Bromwich Albion',
     shortName: 'West Brom',
     abbr: 'WBA',
@@ -433,7 +433,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#122F67'
   },
   {
-    id: '25',
+    id: '21',
     name: 'West Ham United',
     shortName: 'West Ham',
     abbr: 'WHU',
@@ -442,7 +442,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#7A263A'
   },
   {
-    id: '57',
+    id: '111',
     name: 'Wigan Athletic',
     shortName: 'Wigan',
     abbr: 'WIG',
@@ -451,7 +451,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#001489'
   },
   {
-    id: '58',
+    id: '106',
     name: 'Wimbledon',
     shortName: 'Wimbledon',
     abbr: 'WIM',
@@ -460,7 +460,7 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
     primaryColor: '#002B49'
   },
   {
-    id: '38',
+    id: '39',
     name: 'Wolverhampton Wanderers',
     shortName: 'Wolves',
     abbr: 'WOL',
@@ -470,17 +470,21 @@ export const ALL_PREMIER_LEAGUE_CLUBS: ClubData[] = [
   }
 ];
 
-// Helper to resolve club accurately
+/**
+ * Helper to resolve club accurately.
+ * Priorities:
+ * 1. Exact string match against club name, shortName, or abbr
+ * 2. Official PulseLive / FootballAPI team ID match
+ * 3. Alias match
+ * 4. Fuzzy / substring match
+ */
 export function resolveClub(identifier: string | number | undefined | null): ClubData | null {
   if (!identifier) return null;
-  const str = String(identifier).trim().toLowerCase();
+  const rawStr = String(identifier).trim();
+  const str = rawStr.toLowerCase();
   if (!str) return null;
 
-  // 1. Direct ID match
-  const byId = ALL_PREMIER_LEAGUE_CLUBS.find((c) => c.id === str);
-  if (byId) return byId;
-
-  // 2. Exact name or abbr match
+  // 1. Exact name, shortName, or abbr match (Highest priority)
   const byName = ALL_PREMIER_LEAGUE_CLUBS.find(
     (c) =>
       c.name.toLowerCase() === str ||
@@ -489,13 +493,23 @@ export function resolveClub(identifier: string | number | undefined | null): Clu
   );
   if (byName) return byName;
 
-  // 3. Alias match
+  // 2. Direct official ID match
+  const byId = ALL_PREMIER_LEAGUE_CLUBS.find((c) => c.id === rawStr || c.id === str);
+  if (byId) return byId;
+
+  // 3. Exact alias match
   const byAlias = ALL_PREMIER_LEAGUE_CLUBS.find((c) =>
-    c.aliases.some((alias) => alias === str || str.includes(alias) || alias.includes(str))
+    c.aliases.some((alias) => alias === str)
   );
   if (byAlias) return byAlias;
 
-  // 4. Fuzzy containment match
+  // 4. Substring / fuzzy alias match
+  const byAliasFuzzy = ALL_PREMIER_LEAGUE_CLUBS.find((c) =>
+    c.aliases.some((alias) => str.includes(alias) || alias.includes(str))
+  );
+  if (byAliasFuzzy) return byAliasFuzzy;
+
+  // 5. Fuzzy containment match
   const byContains = ALL_PREMIER_LEAGUE_CLUBS.find(
     (c) =>
       str.includes(c.name.toLowerCase()) ||
