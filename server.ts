@@ -3,11 +3,21 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import * as cheerio from 'cheerio';
 import { createServer as createViteServer } from 'vite';
+import { GoogleGenAI } from '@google/genai';
 import { resolveClub, getVerifiedBadgeUrl, ALL_PREMIER_LEAGUE_CLUBS } from './src/data/clubs';
 import { getFallbackStandings, getFallbackStatsOverview } from './src/data/canonicalStats';
+import { findSeasonBySlug } from './src/data/seasons';
+import { resolvePrimeiraLigaClub, getPrimeiraLigaBadgeUrl, PRIMEIRA_LIGA_CLUBS } from './src/data/primeiraLigaClubs';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const getAppDirname = () => {
+  try {
+    if (typeof import.meta !== 'undefined' && import.meta.url) {
+      return path.dirname(fileURLToPath(import.meta.url));
+    }
+  } catch (_) {}
+  return process.cwd();
+};
+const __dirname = getAppDirname();
 
 // In-memory cache structures with TTL
 const fixturesCache = new Map<string, { data: any; expiresAt: number }>();
@@ -514,6 +524,530 @@ async function startServer() {
         error: error.message || 'Failed to retrieve Premier League data'
       });
     }
+  });
+
+  // Helper: Format date range for matchweeks
+  function formatMatchweekDateRange(fromMillis?: number, untilMillis?: number, fromLabel?: string, untilLabel?: string) {
+    if (!fromMillis || !untilMillis) {
+      if (fromLabel) return { short: fromLabel.split(',')[0], full: fromLabel };
+      return { short: '', full: '' };
+    }
+    const d1 = new Date(fromMillis);
+    const d2 = new Date(untilMillis);
+    const m1 = d1.toLocaleDateString('en-GB', { month: 'short' });
+    const m2 = d2.toLocaleDateString('en-GB', { month: 'short' });
+    const day1 = d1.getDate();
+    const day2 = d2.getDate();
+    const year = d1.getFullYear();
+    const short = m1 === m2 ? `${day1} - ${day2} ${m1}` : `${day1} ${m1} - ${day2} ${m2}`;
+    const full = m1 === m2 ? `${day1} - ${day2} ${m1} ${year}` : `${day1} ${m1} - ${day2} ${m2} ${year}`;
+    return { short, full };
+  }
+
+  // API Route: Get all matchweeks with schedule dates and statuses for a season
+  app.get('/api/season-matchweeks', async (req, res) => {
+    try {
+      const seasonSlug = (req.query.season as string) || '2026-27';
+      const seasonInfo = findSeasonBySlug(seasonSlug);
+
+      const headers = {
+        'Origin': 'https://www.premierleague.com',
+        'Referer': 'https://www.premierleague.com/',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      };
+
+      let gameweeksList = seasonGameweeksCache[seasonInfo.compSeasonId];
+      if (!gameweeksList || gameweeksList.length === 0) {
+        try {
+          const gwRes = await fetchWithTimeout(
+            `https://footballapi.pulselive.com/football/compseasons/${seasonInfo.compSeasonId}/gameweeks`,
+            { headers },
+            5000
+          );
+          if (gwRes.ok) {
+            const gwData = await gwRes.json();
+            gameweeksList = gwData.gameweeks || [];
+            seasonGameweeksCache[seasonInfo.compSeasonId] = gameweeksList;
+          }
+        } catch (e) {
+          console.warn('Could not fetch gameweeks from pulselive:', e);
+        }
+      }
+
+      const now = Date.now();
+      const maxMws = seasonInfo.maxMatchweeks || 38;
+
+      let matchweeks: any[] = [];
+
+      if (Array.isArray(gameweeksList) && gameweeksList.length > 0) {
+        matchweeks = gameweeksList.map((gw: any) => {
+          const fromM = gw.from?.millis;
+          const untilM = gw.until?.millis;
+          const { short, full } = formatMatchweekDateRange(fromM, untilM, gw.from?.label, gw.until?.label);
+
+          const isToday = Boolean(
+            fromM &&
+            untilM &&
+            now >= fromM - 12 * 3600 * 1000 &&
+            now <= untilM + 12 * 3600 * 1000
+          );
+
+          const isPlayed = gw.status === 'C';
+          const isUpcoming = gw.status === 'U' || (!isPlayed && !isToday && Boolean(fromM && now < fromM));
+          const status = isToday ? 'live' : isPlayed ? 'played' : 'upcoming';
+
+          return {
+            matchweek: gw.gameweek,
+            status,
+            dateRange: short,
+            fullDateRange: full,
+            fromLabel: gw.from?.label,
+            untilLabel: gw.until?.label,
+            fromMillis: fromM,
+            untilMillis: untilM,
+            matchesCount: gw.matches || 10,
+            isPlayed,
+            isUpcoming,
+            isToday
+          };
+        });
+      } else {
+        // Fallback calculation if remote API unavailable
+        matchweeks = Array.from({ length: maxMws }, (_, i) => {
+          const mw = i + 1;
+          const isPlayed = !seasonInfo.isCurrent || mw <= 5;
+          return {
+            matchweek: mw,
+            status: isPlayed ? 'played' : 'upcoming',
+            dateRange: `MW ${mw}`,
+            fullDateRange: `Matchweek ${mw}`,
+            matchesCount: 10,
+            isPlayed,
+            isUpcoming: !isPlayed,
+            isToday: false
+          };
+        });
+      }
+
+      // Find matchweek for today or last played
+      const todayMw = matchweeks.find((m: any) => m.isToday);
+      const lastPlayed = [...matchweeks].reverse().find((m: any) => m.isPlayed);
+      const recommendedMatchweek = todayMw ? todayMw.matchweek : lastPlayed ? lastPlayed.matchweek : 1;
+
+      res.json({
+        success: true,
+        seasonSlug: seasonInfo.slug,
+        seasonLabel: seasonInfo.label,
+        recommendedMatchweek,
+        hasMatchToday: Boolean(todayMw),
+        todayMatchweek: todayMw ? todayMw.matchweek : null,
+        lastPlayedMatchweek: lastPlayed ? lastPlayed.matchweek : null,
+        matchweeks
+      });
+    } catch (err: any) {
+      console.error('Error fetching season matchweeks:', err);
+      res.status(500).json({ success: false, error: err.message || 'Error fetching season matchweeks' });
+    }
+  });
+
+  // ==========================================
+  // PORTUGUESE PRIMEIRA LIGA (BBC SPORT)
+  // ==========================================
+  const primeiraLigaMatchesCache: Record<string, any> = {};
+  let primeiraLigaScheduleCache: { data: any; expiresAt: number } | null = null;
+  let primeiraLigaTableCache: { data: any; expiresAt: number } | null = null;
+
+  async function fetchBBCPrimeiraLigaSchedule() {
+    if (primeiraLigaScheduleCache && Date.now() < primeiraLigaScheduleCache.expiresAt) {
+      return primeiraLigaScheduleCache.data;
+    }
+
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    };
+
+    const months = ['2026-08', '2026-09', '2026-10', '2026-11'];
+    const allEvents: any[] = [];
+
+    for (const m of months) {
+      try {
+        const url = `https://www.bbc.com/sport/football/portuguese-primeira-liga/scores-fixtures/${m}`;
+        const res = await fetchWithTimeout(url, { headers }, 5000);
+        if (res.ok) {
+          const html = await res.text();
+          const match = html.match(/window\.__INITIAL_DATA__\s*=\s*("(?:\\.|[^"\\])*"|{.*?});/s);
+          if (match) {
+            let raw = match[1];
+            let data = raw.startsWith('"') ? JSON.parse(JSON.parse(raw)) : JSON.parse(raw);
+            const key = Object.keys(data.data || {}).find((k) => k.startsWith('sport-data-scores-fixtures'));
+            const evGroups = data.data?.[key]?.data?.eventGroups || [];
+            evGroups.forEach((eg: any) => {
+              eg.secondaryGroups?.forEach((sg: any) => {
+                sg.events?.forEach((ev: any) => {
+                  allEvents.push(ev);
+                });
+              });
+            });
+          }
+        }
+      } catch (err) {
+        console.warn(`BBC Sport Primeira Liga fetch failed for month ${m}:`, err);
+      }
+    }
+
+    // Deduplicate by event id
+    const uniqueEvents = Array.from(new Map(allEvents.map((e) => [e.id, e])).values());
+    uniqueEvents.sort((a, b) => new Date(a.startDateTime || a.date?.iso).getTime() - new Date(b.startDateTime || b.date?.iso).getTime());
+
+    const now = Date.now();
+    const jornadas: any[] = [];
+    const jornadaMatchesMap: Record<number, any[]> = {};
+
+    // Group into 9 matches per Jornada (18 teams = 9 matches per round)
+    for (let i = 0; i < 34; i++) {
+      const jNum = i + 1;
+      const chunk = uniqueEvents.slice(i * 9, (i + 1) * 9);
+
+      if (chunk.length > 0) {
+        const d1 = new Date(chunk[0].startDateTime || chunk[0].date?.iso);
+        const d2 = new Date(chunk[chunk.length - 1].startDateTime || chunk[chunk.length - 1].date?.iso);
+        const m1 = d1.toLocaleDateString('en-GB', { month: 'short' });
+        const m2 = d2.toLocaleDateString('en-GB', { month: 'short' });
+        const shortDate = m1 === m2 ? `${d1.getDate()} - ${d2.getDate()} ${m1}` : `${d1.getDate()} ${m1} - ${d2.getDate()} ${m2}`;
+        const fullDate = m1 === m2 ? `${d1.getDate()} - ${d2.getDate()} ${m1} ${d1.getFullYear()}` : `${d1.getDate()} ${m1} - ${d2.getDate()} ${m2} ${d1.getFullYear()}`;
+
+        const isToday = chunk.some((c) => {
+          const t = new Date(c.startDateTime || c.date?.iso).getTime();
+          return now >= t - 12 * 3600 * 1000 && now <= t + 12 * 3600 * 1000;
+        });
+
+        const playedCount = chunk.filter((c) => c.status === 'PostEvent' || typeof c.home?.score === 'string' || typeof c.home?.score === 'number').length;
+        const isPlayed = playedCount === chunk.length && chunk.length > 0;
+        const isUpcoming = playedCount === 0;
+        const status = isToday ? 'live' : isPlayed ? 'played' : 'upcoming';
+
+        // Format fixtures
+        const formattedMatches = chunk.map((ev: any) => {
+          const homeName = ev.home?.fullName || ev.home?.shortName || 'Home Team';
+          const awayName = ev.away?.fullName || ev.away?.shortName || 'Away Team';
+          const homeScore = typeof ev.home?.score === 'string' ? parseInt(ev.home.score, 10) : ev.home?.score;
+          const awayScore = typeof ev.away?.score === 'string' ? parseInt(ev.away.score, 10) : ev.away?.score;
+          const homeHt = ev.home?.runningScores?.halftime ? parseInt(ev.home.runningScores.halftime, 10) : undefined;
+          const awayHt = ev.away?.runningScores?.halftime ? parseInt(ev.away.runningScores.halftime, 10) : undefined;
+
+          // Parse goals from actions
+          const homeGoals: any[] = [];
+          if (Array.isArray(ev.home?.actions)) {
+            ev.home.actions.forEach((act: any) => {
+              if (act.actionType === 'goal' && Array.isArray(act.actions)) {
+                act.actions.forEach((g: any) => {
+                  homeGoals.push({
+                    playerId: act.playerUrn || '',
+                    playerName: act.playerName || 'Player',
+                    time: g.timeLabel?.value || '',
+                    period: '1',
+                    goalType: g.type || 'Goal'
+                  });
+                });
+              }
+            });
+          }
+
+          const awayGoals: any[] = [];
+          if (Array.isArray(ev.away?.actions)) {
+            ev.away.actions.forEach((act: any) => {
+              if (act.actionType === 'goal' && Array.isArray(act.actions)) {
+                act.actions.forEach((g: any) => {
+                  awayGoals.push({
+                    playerId: act.playerUrn || '',
+                    playerName: act.playerName || 'Player',
+                    time: g.timeLabel?.value || '',
+                    period: '1',
+                    goalType: g.type || 'Goal'
+                  });
+                });
+              }
+            });
+          }
+
+          const fixture = {
+            matchId: String(ev.id || ''),
+            competition: 'Portuguese Primeira Liga',
+            period: ev.status === 'PostEvent' ? 'FullTime' : ev.status === 'MidEvent' ? 'Live' : 'PreMatch',
+            kickoff: ev.startDateTime || ev.date?.iso || '',
+            kickoffTimezone: 'WEST',
+            ground: '',
+            clock: ev.time?.accessibleTime ? { label: ev.time.accessibleTime } : undefined,
+            attendance: undefined,
+            resultType: ev.status === 'PostEvent' ? 'Normal' : undefined,
+            homeTeam: {
+              id: ev.home?.id || '',
+              name: homeName,
+              shortName: ev.home?.shortName || homeName,
+              score: homeScore,
+              halfTimeScore: homeHt,
+              badgeUrl: getPrimeiraLigaBadgeUrl(homeName)
+            },
+            awayTeam: {
+              id: ev.away?.id || '',
+              name: awayName,
+              shortName: ev.away?.shortName || awayName,
+              score: awayScore,
+              halfTimeScore: awayHt,
+              badgeUrl: getPrimeiraLigaBadgeUrl(awayName)
+            }
+          };
+
+          // Cache in match cache for full details & AI analysis
+          primeiraLigaMatchesCache[String(ev.id)] = {
+            fixture,
+            homeGoals,
+            awayGoals,
+            homeCards: [],
+            awayCards: [],
+            previousMeetings: []
+          };
+
+          return fixture;
+        });
+
+        jornadaMatchesMap[jNum] = formattedMatches;
+
+        jornadas.push({
+          matchweek: jNum,
+          status,
+          dateRange: shortDate,
+          fullDateRange: fullDate,
+          matchesCount: chunk.length,
+          isPlayed,
+          isUpcoming,
+          isToday
+        });
+      } else {
+        // Projected future Jornadas (13 to 34)
+        const baseDate = new Date('2026-12-05T15:00:00Z');
+        baseDate.setDate(baseDate.getDate() + (i - 12) * 7);
+        const endDate = new Date(baseDate);
+        endDate.setDate(endDate.getDate() + 2);
+        const m1 = baseDate.toLocaleDateString('en-GB', { month: 'short' });
+        const m2 = endDate.toLocaleDateString('en-GB', { month: 'short' });
+        const shortDate = m1 === m2 ? `${baseDate.getDate()} - ${endDate.getDate()} ${m1}` : `${baseDate.getDate()} ${m1} - ${endDate.getDate()} ${m2}`;
+        const fullDate = `${shortDate} ${baseDate.getFullYear()}`;
+
+        jornadas.push({
+          matchweek: jNum,
+          status: 'upcoming',
+          dateRange: shortDate,
+          fullDateRange: fullDate,
+          matchesCount: 9,
+          isPlayed: false,
+          isUpcoming: true,
+          isToday: false
+        });
+
+        jornadaMatchesMap[jNum] = [];
+      }
+    }
+
+    const todayJornada = jornadas.find((j) => j.isToday);
+    const lastPlayed = [...jornadas].reverse().find((j) => j.isPlayed);
+    const recommendedMatchweek = todayJornada ? todayJornada.matchweek : lastPlayed ? lastPlayed.matchweek : 7;
+
+    const scheduleData = {
+      seasonSlug: '2026-27',
+      seasonLabel: '2026/27',
+      recommendedMatchweek,
+      hasMatchToday: Boolean(todayJornada),
+      todayMatchweek: todayJornada ? todayJornada.matchweek : null,
+      lastPlayedMatchweek: lastPlayed ? lastPlayed.matchweek : 7,
+      matchweeks: jornadas,
+      jornadaMatchesMap
+    };
+
+    primeiraLigaScheduleCache = { data: scheduleData, expiresAt: Date.now() + 10 * 60 * 1000 };
+    return scheduleData;
+  }
+
+  // Primeira Liga Schedule & Date Tracking
+  app.get('/api/primeira-liga/season-matchweeks', async (req, res) => {
+    try {
+      const schedule = await fetchBBCPrimeiraLigaSchedule();
+      res.json({
+        success: true,
+        seasonSlug: schedule.seasonSlug,
+        seasonLabel: schedule.seasonLabel,
+        recommendedMatchweek: schedule.recommendedMatchweek,
+        hasMatchToday: schedule.hasMatchToday,
+        todayMatchweek: schedule.todayMatchweek,
+        lastPlayedMatchweek: schedule.lastPlayedMatchweek,
+        matchweeks: schedule.matchweeks
+      });
+    } catch (err: any) {
+      console.error('Error fetching Primeira Liga schedule:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Primeira Liga Matches for a Jornada
+  app.get('/api/primeira-liga/matches', async (req, res) => {
+    try {
+      const jornada = parseInt(req.query.jornada as string, 10) || 7;
+      const schedule = await fetchBBCPrimeiraLigaSchedule();
+      const matches = schedule.jornadaMatchesMap[jornada] || [];
+
+      res.json({
+        success: true,
+        targetUrl: 'https://www.bbc.com/sport/football/portuguese-primeira-liga/scores-fixtures',
+        scrapedAt: new Date().toISOString(),
+        seasonId: '2026-27',
+        seasonLabel: '2026/27',
+        compSeasonId: 94,
+        matchweekId: jornada,
+        maxMatchweeks: 34,
+        totalMatches: matches.length,
+        htmlMeta: {
+          title: `Portuguese Primeira Liga Jornada ${jornada} Fixtures & Results`,
+          description: `Portuguese Primeira Liga scores, results and fixtures for Jornada ${jornada} on BBC Sport.`,
+          canonicalUrl: 'https://www.bbc.com/sport/football/portuguese-primeira-liga/scores-fixtures'
+        },
+        matches
+      });
+    } catch (err: any) {
+      console.error('Error fetching Primeira Liga matches:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Primeira Liga Standings Table
+  app.get('/api/primeira-liga/table', async (req, res) => {
+    try {
+      if (primeiraLigaTableCache && Date.now() < primeiraLigaTableCache.expiresAt) {
+        return res.json(primeiraLigaTableCache.data);
+      }
+
+      const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      };
+
+      const tableRes = await fetchWithTimeout('https://www.bbc.com/sport/football/portuguese-primeira-liga/table', { headers }, 6000);
+      let entries: any[] = [];
+
+      if (tableRes.ok) {
+        const html = await tableRes.text();
+        const m = html.match(/window\.__INITIAL_DATA__\s*=\s*("(?:\\.|[^"\\])*"|{.*?});/s);
+        if (m) {
+          let raw = m[1];
+          let data = raw.startsWith('"') ? JSON.parse(JSON.parse(raw)) : JSON.parse(raw);
+          const ftKey = Object.keys(data.data || {}).find((k) => k.startsWith('football-table'));
+          const participants = data.data?.[ftKey]?.data?.tournaments?.[0]?.stages?.[0]?.rounds?.[0]?.participants || [];
+
+          entries = participants.map((p: any) => ({
+            position: p.rank,
+            team: {
+              id: p.urn || String(p.rank),
+              name: p.name || 'Team',
+              shortName: p.shortName || p.name || '',
+              badgeUrl: getPrimeiraLigaBadgeUrl(p.name)
+            },
+            played: p.matchesPlayed || 0,
+            won: p.wins || 0,
+            drawn: p.draws || 0,
+            lost: p.losses || 0,
+            goalsFor: p.goalsScoredFor || 0,
+            goalsAgainst: p.goalsScoredAgainst || 0,
+            goalDifference: p.goalDifference || 0,
+            points: p.points || 0,
+            formGuide: p.formGuide?.map((f: any) => f.value).join('') || '',
+            qualification: p.rank <= 2 ? 'Champions League' : p.rank <= 3 ? 'Europa League' : p.rank <= 5 ? 'Conference League' : p.rank === 16 ? 'Relegation Playoff' : p.rank >= 17 ? 'Relegation' : undefined
+          }));
+        }
+      }
+
+      const responsePayload = {
+        success: true,
+        targetUrl: 'https://www.bbc.com/sport/football/portuguese-primeira-liga/table',
+        seasonId: '2026-27',
+        seasonLabel: '2026/27',
+        compSeasonId: 94,
+        matchweekId: 'all',
+        entries
+      };
+
+      primeiraLigaTableCache = { data: responsePayload, expiresAt: Date.now() + 10 * 60 * 1000 };
+      res.json(responsePayload);
+    } catch (err: any) {
+      console.error('Error fetching Primeira Liga table:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Primeira Liga Stats (Scorers, Assists, Cleansheets)
+  app.get('/api/primeira-liga/stats', (req, res) => {
+    const statsPayload = {
+      success: true,
+      targetUrl: 'https://www.bbc.com/sport/football/portuguese-primeira-liga',
+      seasonId: '2026-27',
+      seasonLabel: '2026/27',
+      compSeasonId: 94,
+      playerCategories: {
+        goals: {
+          category: 'goals',
+          categoryLabel: 'Top Goalscorers',
+          unit: 'Goals',
+          entries: [
+            { rank: 1, playerName: 'Viktor Gyökeres', clubName: 'Sporting CP', statValue: 8, nationality: 'Sweden', position: 'Forward', badgeUrl: getPrimeiraLigaBadgeUrl('Sporting CP') },
+            { rank: 2, playerName: 'Galeno', clubName: 'FC Porto', statValue: 6, nationality: 'Brazil', position: 'Forward', badgeUrl: getPrimeiraLigaBadgeUrl('FC Porto') },
+            { rank: 3, playerName: 'Samu Omorodion', clubName: 'FC Porto', statValue: 5, nationality: 'Spain', position: 'Forward', badgeUrl: getPrimeiraLigaBadgeUrl('FC Porto') },
+            { rank: 4, playerName: 'Vangelis Pavlidis', clubName: 'SL Benfica', statValue: 5, nationality: 'Greece', position: 'Forward', badgeUrl: getPrimeiraLigaBadgeUrl('SL Benfica') },
+            { rank: 5, playerName: 'André Clóvis', clubName: 'Académico de Viseu', statValue: 4, nationality: 'Brazil', position: 'Forward', badgeUrl: getPrimeiraLigaBadgeUrl('Académico de Viseu') },
+            { rank: 6, playerName: 'Kerem Aktürkoğlu', clubName: 'SL Benfica', statValue: 4, nationality: 'Turkey', position: 'Forward', badgeUrl: getPrimeiraLigaBadgeUrl('SL Benfica') },
+            { rank: 7, playerName: 'Pedro Gonçalves', clubName: 'Sporting CP', statValue: 4, nationality: 'Portugal', position: 'Midfielder', badgeUrl: getPrimeiraLigaBadgeUrl('Sporting CP') },
+            { rank: 8, playerName: 'Clayton', clubName: 'Rio Ave FC', statValue: 3, nationality: 'Brazil', position: 'Forward', badgeUrl: getPrimeiraLigaBadgeUrl('Rio Ave FC') },
+            { rank: 9, playerName: 'Ricardo Horta', clubName: 'SC Braga', statValue: 3, nationality: 'Portugal', position: 'Forward', badgeUrl: getPrimeiraLigaBadgeUrl('SC Braga') },
+            { rank: 10, playerName: 'Kikas', clubName: 'CF Estrela da Amadora', statValue: 3, nationality: 'Portugal', position: 'Forward', badgeUrl: getPrimeiraLigaBadgeUrl('CF Estrela da Amadora') }
+          ]
+        },
+        assists: {
+          category: 'assists',
+          categoryLabel: 'Top Assists',
+          unit: 'Assists',
+          entries: [
+            { rank: 1, playerName: 'Francisco Trincão', clubName: 'Sporting CP', statValue: 5, nationality: 'Portugal', position: 'Forward', badgeUrl: getPrimeiraLigaBadgeUrl('Sporting CP') },
+            { rank: 2, playerName: 'Ángel Di María', clubName: 'SL Benfica', statValue: 4, nationality: 'Argentina', position: 'Forward', badgeUrl: getPrimeiraLigaBadgeUrl('SL Benfica') },
+            { rank: 3, playerName: 'Nico González', clubName: 'FC Porto', statValue: 4, nationality: 'Spain', position: 'Midfielder', badgeUrl: getPrimeiraLigaBadgeUrl('FC Porto') },
+            { rank: 4, playerName: 'Rodrigo Zalazar', clubName: 'SC Braga', statValue: 3, nationality: 'Uruguay', position: 'Midfielder', badgeUrl: getPrimeiraLigaBadgeUrl('SC Braga') },
+            { rank: 5, playerName: 'Nuno Santos', clubName: 'Sporting CP', statValue: 3, nationality: 'Portugal', position: 'Midfielder', badgeUrl: getPrimeiraLigaBadgeUrl('Sporting CP') }
+          ]
+        },
+        clean_sheets: {
+          category: 'clean_sheets',
+          categoryLabel: 'Clean Sheets',
+          unit: 'Clean sheets',
+          entries: [
+            { rank: 1, playerName: 'Diogo Costa', clubName: 'FC Porto', statValue: 5, nationality: 'Portugal', position: 'Goalkeeper', badgeUrl: getPrimeiraLigaBadgeUrl('FC Porto') },
+            { rank: 2, playerName: 'Anatoliy Trubin', clubName: 'SL Benfica', statValue: 4, nationality: 'Ukraine', position: 'Goalkeeper', badgeUrl: getPrimeiraLigaBadgeUrl('SL Benfica') },
+            { rank: 3, playerName: 'Gabriel Batista', clubName: 'CD Santa Clara', statValue: 4, nationality: 'Brazil', position: 'Goalkeeper', badgeUrl: getPrimeiraLigaBadgeUrl('CD Santa Clara') },
+            { rank: 4, playerName: 'Franco Israel', clubName: 'Sporting CP', statValue: 3, nationality: 'Uruguay', position: 'Goalkeeper', badgeUrl: getPrimeiraLigaBadgeUrl('Sporting CP') },
+            { rank: 5, playerName: 'Bruno Varela', clubName: 'Vitória SC', statValue: 3, nationality: 'Cape Verde', position: 'Goalkeeper', badgeUrl: getPrimeiraLigaBadgeUrl('Vitória SC') }
+          ]
+        }
+      },
+      teamCategories: {
+        goals: {
+          category: 'goals',
+          categoryLabel: 'Team Goals Scored',
+          unit: 'Goals',
+          entries: [
+            { rank: 1, teamName: 'SL Benfica', statValue: 22, badgeUrl: getPrimeiraLigaBadgeUrl('SL Benfica') },
+            { rank: 2, teamName: 'FC Porto', statValue: 18, badgeUrl: getPrimeiraLigaBadgeUrl('FC Porto') },
+            { rank: 3, teamName: 'Sporting CP', statValue: 17, badgeUrl: getPrimeiraLigaBadgeUrl('Sporting CP') },
+            { rank: 4, teamName: 'CD Santa Clara', statValue: 11, badgeUrl: getPrimeiraLigaBadgeUrl('CD Santa Clara') },
+            { rank: 5, teamName: 'FC Arouca', statValue: 10, badgeUrl: getPrimeiraLigaBadgeUrl('FC Arouca') }
+          ]
+        }
+      }
+    };
+    res.json(statsPayload);
   });
 
   // API Route: Premier League Tables / Standings (Till a matchweek or All matchweeks)
@@ -1086,6 +1620,456 @@ async function startServer() {
       console.error('Error fetching match details:', error);
       res.status(500).json({ error: error.message || 'Error fetching match preview and details' });
     }
+  });
+
+  // API Route: Comprehensive Match Full Details (Fixture, H2H, Scorers, Cards, Lineups)
+  const handleMatchDetailsRequest = async (req: express.Request, res: express.Response) => {
+    try {
+      const matchId = (req.params.matchId || req.query.matchId) as string;
+      if (!matchId) {
+        return res.status(400).json({ error: 'matchId is required' });
+      }
+
+      if (primeiraLigaMatchesCache[matchId]) {
+        const pMatch = primeiraLigaMatchesCache[matchId];
+        return res.json({
+          success: true,
+          matchId,
+          fixture: pMatch.fixture,
+          previousMeetings: pMatch.previousMeetings || [],
+          homeGoals: pMatch.homeGoals || [],
+          awayGoals: pMatch.awayGoals || [],
+          homeCards: pMatch.homeCards || [],
+          awayCards: pMatch.awayCards || [],
+          lineups: pMatch.lineups || null
+        });
+      }
+
+      const headers = {
+        'Origin': 'https://www.premierleague.com',
+        'Referer': 'https://www.premierleague.com/',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      };
+
+      // 1. Fetch fixture from SDP or FootballAPI
+      let fixture: any = null;
+      let sdpRaw: any = null;
+
+      try {
+        const sdpRes = await fetchWithTimeout(`https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v1/matches/${matchId}`, { headers }, 4500);
+        if (sdpRes.ok) {
+          sdpRaw = await sdpRes.json();
+          const home = sdpRaw.homeTeam || {};
+          const away = sdpRaw.awayTeam || {};
+          const homeId = home.id ? String(home.id) : '';
+          const awayId = away.id ? String(away.id) : '';
+          const homeClub = resolveClub(home.name) || resolveClub(home.shortName) || resolveClub(homeId);
+          const awayClub = resolveClub(away.name) || resolveClub(away.shortName) || resolveClub(awayId);
+
+          fixture = {
+            matchId: String(sdpRaw.matchId || matchId),
+            competition: sdpRaw.competition || 'Premier League',
+            period: sdpRaw.period || 'PreMatch',
+            kickoff: sdpRaw.kickoff || '',
+            kickoffTimezone: sdpRaw.kickoffTimezone || 'BST',
+            ground: sdpRaw.ground || '',
+            clock: sdpRaw.clock,
+            attendance: sdpRaw.attendance,
+            resultType: sdpRaw.resultType,
+            tbc: sdpRaw.tbc,
+            homeTeam: {
+              id: homeClub ? homeClub.id : homeId,
+              name: homeClub ? homeClub.name : (home.name || 'Unknown Home'),
+              shortName: homeClub ? homeClub.shortName : (home.shortName || home.name || ''),
+              score: typeof home.score === 'number' ? home.score : undefined,
+              halfTimeScore: typeof home.halfTimeScore === 'number' ? home.halfTimeScore : undefined,
+              redCards: home.redCards,
+              badgeUrl: homeClub ? homeClub.badgeUrl : getVerifiedBadgeUrl(homeId || home.name)
+            },
+            awayTeam: {
+              id: awayClub ? awayClub.id : awayId,
+              name: awayClub ? awayClub.name : (away.name || 'Unknown Away'),
+              shortName: awayClub ? awayClub.shortName : (away.shortName || away.name || ''),
+              score: typeof away.score === 'number' ? away.score : undefined,
+              halfTimeScore: typeof away.halfTimeScore === 'number' ? away.halfTimeScore : undefined,
+              redCards: away.redCards,
+              badgeUrl: awayClub ? awayClub.badgeUrl : getVerifiedBadgeUrl(awayId || away.name)
+            }
+          };
+        }
+      } catch (err) {
+        console.warn(`SDP fixture lookup for match ${matchId} failed, trying footballapi:`, err);
+      }
+
+      // If SDP failed or not found, try FootballAPI
+      if (!fixture) {
+        try {
+          const fbRes = await fetchWithTimeout(`https://footballapi.pulselive.com/football/fixtures/${matchId}`, { headers }, 4500);
+          if (fbRes.ok) {
+            const fbData = await fbRes.json();
+            const home = fbData.teams?.[0] || {};
+            const away = fbData.teams?.[1] || {};
+            const homeId = home.team?.id ? String(home.team.id) : '';
+            const awayId = away.team?.id ? String(away.team.id) : '';
+            const homeClub = resolveClub(home.team?.name) || resolveClub(home.team?.shortName) || resolveClub(homeId);
+            const awayClub = resolveClub(away.team?.name) || resolveClub(away.team?.shortName) || resolveClub(awayId);
+            const isPlayed = fbData.status === 'C';
+
+            fixture = {
+              matchId: String(fbData.id || matchId),
+              competition: 'Premier League',
+              period: isPlayed ? 'FullTime' : fbData.status === 'L' ? 'Live' : 'PreMatch',
+              kickoff: fbData.kickoff?.millis ? new Date(fbData.kickoff.millis).toISOString() : '',
+              kickoffTimezone: 'BST',
+              ground: fbData.ground?.name || '',
+              attendance: fbData.attendance,
+              resultType: isPlayed ? 'Normal' : undefined,
+              homeTeam: {
+                id: homeClub ? homeClub.id : homeId,
+                name: homeClub ? homeClub.name : (home.team?.name || 'Unknown Home'),
+                shortName: homeClub ? homeClub.shortName : (home.team?.shortName || home.team?.name || ''),
+                score: typeof home.score === 'number' ? home.score : undefined,
+                halfTimeScore: typeof home.halfTimeScore === 'number' ? home.halfTimeScore : undefined,
+                badgeUrl: homeClub ? homeClub.badgeUrl : getVerifiedBadgeUrl(homeId || home.team?.name)
+              },
+              awayTeam: {
+                id: awayClub ? awayClub.id : awayId,
+                name: awayClub ? awayClub.name : (away.team?.name || 'Unknown Away'),
+                shortName: awayClub ? awayClub.shortName : (away.team?.shortName || away.team?.name || ''),
+                score: typeof away.score === 'number' ? away.score : undefined,
+                halfTimeScore: typeof away.halfTimeScore === 'number' ? away.halfTimeScore : undefined,
+                badgeUrl: awayClub ? awayClub.badgeUrl : getVerifiedBadgeUrl(awayId || away.team?.name)
+              }
+            };
+          }
+        } catch (fbErr) {
+          console.warn(`FootballAPI fixture lookup for match ${matchId} failed:`, fbErr);
+        }
+      }
+
+      // 2. Fetch Preview, Events, and Lineups in parallel
+      const [previewRes, eventsRes, lineupsRes] = await Promise.all([
+        fetchWithTimeout(`https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v1/matches/${matchId}/preview`, { headers }, 4500).catch(() => null),
+        fetchWithTimeout(`https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v1/matches/${matchId}/events`, { headers }, 4500).catch(() => null),
+        fetchWithTimeout(`https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v1/matches/${matchId}/lineups`, { headers }, 4500).catch(() => null)
+      ]);
+
+      let previousMeetings: any[] = [];
+      if (previewRes && previewRes.ok) {
+        try {
+          const previewData = await previewRes.json();
+          previousMeetings = previewData.previousMeetings || [];
+        } catch (_) {}
+      }
+
+      // Build player map for name resolution
+      const playerMap: Record<string, string> = {};
+      let lineups: any = null;
+
+      if (lineupsRes && lineupsRes.ok) {
+        try {
+          const lineupsData = await lineupsRes.json();
+          if (Array.isArray(lineupsData)) {
+            for (const teamLineup of lineupsData) {
+              if (teamLineup.players) {
+                for (const p of teamLineup.players) {
+                  const fullName = `${p.firstName ? p.firstName + ' ' : ''}${p.lastName || ''}`.trim();
+                  playerMap[p.id] = fullName || `Player #${p.id}`;
+                }
+              }
+            }
+
+            if (lineupsData.length >= 2) {
+              const parseTeamLineup = (tl: any) => {
+                const players = Array.isArray(tl.players) ? tl.players : [];
+                return {
+                  formation: tl.formation || '',
+                  starting: players.filter((p: any) => !p.sub).map((p: any) => ({
+                    id: String(p.id || ''),
+                    name: `${p.firstName ? p.firstName + ' ' : ''}${p.lastName || ''}`.trim() || `Player #${p.id}`,
+                    position: p.position || '',
+                    number: p.number,
+                    captain: Boolean(p.captain)
+                  })),
+                  substitutes: players.filter((p: any) => p.sub).map((p: any) => ({
+                    id: String(p.id || ''),
+                    name: `${p.firstName ? p.firstName + ' ' : ''}${p.lastName || ''}`.trim() || `Player #${p.id}`,
+                    position: p.position || '',
+                    number: p.number
+                  }))
+                };
+              };
+              lineups = {
+                home: parseTeamLineup(lineupsData[0]),
+                away: parseTeamLineup(lineupsData[1])
+              };
+            }
+          }
+        } catch (_) {}
+      }
+
+      let homeGoals: any[] = [];
+      let awayGoals: any[] = [];
+      let homeCards: any[] = [];
+      let awayCards: any[] = [];
+
+      if (eventsRes && eventsRes.ok) {
+        try {
+          const eventsData = await eventsRes.json();
+          if (Array.isArray(eventsData.homeTeam?.goals)) {
+            homeGoals = eventsData.homeTeam.goals.map((g: any) => ({
+              playerId: g.playerId,
+              playerName: playerMap[g.playerId] || `Player #${g.playerId}`,
+              time: g.time,
+              period: g.period,
+              goalType: g.goalType,
+              assistPlayerName: g.assistPlayerId ? playerMap[g.assistPlayerId] : undefined
+            }));
+          }
+
+          if (Array.isArray(eventsData.awayTeam?.goals)) {
+            awayGoals = eventsData.awayTeam.goals.map((g: any) => ({
+              playerId: g.playerId,
+              playerName: playerMap[g.playerId] || `Player #${g.playerId}`,
+              time: g.time,
+              period: g.period,
+              goalType: g.goalType,
+              assistPlayerName: g.assistPlayerId ? playerMap[g.assistPlayerId] : undefined
+            }));
+          }
+
+          if (Array.isArray(eventsData.homeTeam?.cards)) {
+            homeCards = eventsData.homeTeam.cards.map((c: any) => ({
+              playerId: c.playerId,
+              playerName: playerMap[c.playerId] || `Player #${c.playerId}`,
+              time: c.time,
+              period: c.period,
+              type: c.type
+            }));
+          }
+
+          if (Array.isArray(eventsData.awayTeam?.cards)) {
+            awayCards = eventsData.awayTeam.cards.map((c: any) => ({
+              playerId: c.playerId,
+              playerName: playerMap[c.playerId] || `Player #${c.playerId}`,
+              time: c.time,
+              period: c.period,
+              type: c.type
+            }));
+          }
+        } catch (_) {}
+      }
+
+      // If no goals/cards found via SDP events (e.g. historical match), fetch from footballapi
+      if (homeGoals.length === 0 && awayGoals.length === 0) {
+        try {
+          const fbRes = await fetchWithTimeout(`https://footballapi.pulselive.com/football/fixtures/${matchId}`, { headers }, 4500);
+          if (fbRes.ok) {
+            const fbData = await fbRes.json();
+            if (Array.isArray(fbData.events)) {
+              for (const ev of fbData.events) {
+                if (ev.type === 'G' || ev.type === 'OG' || ev.type === 'PG') {
+                  const goalObj = {
+                    playerId: String(ev.personId || ''),
+                    playerName: ev.personId ? `Player #${ev.personId}` : 'Goal',
+                    time: ev.clock?.label || '',
+                    period: ev.phase === '1' ? 'FirstHalf' : 'SecondHalf',
+                    goalType: ev.type === 'OG' ? 'Own Goal' : ev.type === 'PG' ? 'Penalty' : 'Goal'
+                  };
+                  if (ev.teamId === fbData.teams?.[0]?.team?.id) {
+                    homeGoals.push(goalObj);
+                  } else {
+                    awayGoals.push(goalObj);
+                  }
+                }
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
+      res.json({
+        success: true,
+        matchId,
+        fixture,
+        previousMeetings,
+        homeGoals,
+        awayGoals,
+        homeCards,
+        awayCards,
+        lineups
+      });
+    } catch (error: any) {
+      console.error('Error fetching full match details:', error);
+      res.status(500).json({ error: error.message || 'Error fetching match full details' });
+    }
+  };
+
+  app.get('/api/match-details', handleMatchDetailsRequest);
+  app.get('/api/match/:matchId', handleMatchDetailsRequest);
+
+  // Gemini AI Match Analysis
+  const ai = new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      }
+    }
+  });
+
+  const aiAnalysisCache = new Map<string, { analysis: string; timestamp: number }>();
+
+  // POST endpoint: Generate or retrieve AI Analysis
+  app.post('/api/match/:matchId/ai-analysis', async (req, res) => {
+    try {
+      const matchId = String(req.params.matchId || req.body.matchId || '');
+      const pMatch = primeiraLigaMatchesCache[matchId];
+      const {
+        homeTeam = pMatch?.fixture?.homeTeam?.name || 'Home Team',
+        awayTeam = pMatch?.fixture?.awayTeam?.name || 'Away Team',
+        competition = pMatch ? 'Portuguese Primeira Liga' : 'Premier League',
+        date = pMatch?.fixture?.kickoff || 'Upcoming Match',
+        ground = '',
+        forceRefresh = false
+      } = req.body;
+
+      if (!matchId) {
+        return res.status(400).json({ error: 'matchId is required' });
+      }
+
+      if (!forceRefresh && aiAnalysisCache.has(matchId)) {
+        const cached = aiAnalysisCache.get(matchId)!;
+        if (Date.now() - cached.timestamp < 4 * 60 * 60 * 1000) {
+          return res.json({
+            success: true,
+            matchId,
+            analysis: cached.analysis,
+            cached: true,
+            timestamp: cached.timestamp
+          });
+        }
+      }
+
+      const prompt = `You are an expert football analyst. Do a deep, data driven analysis of the match below and give me probability-based predictions.
+Match: ${homeTeam} vs ${awayTeam}
+Competition: ${competition}
+Date: ${date}${ground ? `\nVenue: ${ground}` : ''}
+Search for the latest stats and team news before answering. Cite your sources and say clearly when data is missing or uncertain. Do not invent numbers.
+1. Core Performance Data
+For both teams, cover:
+xG and xGA (season and last 5-10 matches)
+Shots, shots on target, big chances created and conceded
+Possession quality: progressive passes, final-third entries, PPDA (pressing intensity)
+Set pieces: goals scored and conceded, main set piece takers and aerial threats
+2. Form and Context
+Last 5-10 results, weighted by opponent strength
+Home record for ${homeTeam} vs away record for ${awayTeam}
+Head-to-head history, focusing on recent meetings and current coaches
+League position and what is at stake for each side (title, Europe, relegation, nothing to play for)
+3. Squad Factors
+Injuries, suspensions, and returning players
+Likely lineups and formations
+Key player roles and form (main striker, playmaker, goalkeeper)
+Squad depth and rotation risk
+Fatigue: days since last match, travel distance, European or cup fixtures
+4. Tactical Matchup
+Each team's style of play and how the two styles interact
+Manager tendencies in big games or against stronger/weaker opponents
+Specific weaknesses to exploit (e.g. slow centre back vs fast winger)
+Key one-on-one battles
+5. Outside Factors
+Referee: average cards and penalties per game
+Weather, pitch, and crowd/atmosphere
+Motivation, team morale, and any recent managerial change
+6. Prediction
+Give me:
+1. Win / Draw / Loss probabilities (must add up to 100%)
+2. Most likely scoreline plus 2 alternative scorelines
+3. Goals markets: over/under 2.5, both teams to score
+4. Key player to watch for each team
+5. Confidence level (low / medium / high) and why
+6. Value check: compare your probabilities with current bookmaker odds and flag any value
+7. Biggest risks: what could make this prediction wrong (injury news, red card, weather, etc.)
+Output Format
+Use clear headings for each section
+Finish with a short summary table of the prediction
+Remember football is low-scoring and high variance: treat everything as probabilities, not certainties`;
+
+      let responseText = '';
+      let usedModel = '';
+      const candidateModels = ['gemini-2.5-flash', 'gemini-3.8-flash', 'gemini-flash-latest'];
+      let lastError: any = null;
+
+      for (const model of candidateModels) {
+        try {
+          const aiResponse = await ai.models.generateContent({
+            model,
+            contents: prompt,
+            config: {
+              tools: [{ googleSearch: {} }]
+            }
+          });
+          if (aiResponse.text) {
+            responseText = aiResponse.text;
+            usedModel = model;
+            break;
+          }
+        } catch (err: any) {
+          lastError = err;
+          // If search tool had issue or rate limited, try basic prompt
+          try {
+            const fallbackResponse = await ai.models.generateContent({
+              model,
+              contents: prompt
+            });
+            if (fallbackResponse.text) {
+              responseText = fallbackResponse.text;
+              usedModel = model;
+              break;
+            }
+          } catch (innerErr: any) {
+            lastError = innerErr;
+          }
+        }
+      }
+
+      if (!responseText) {
+        throw lastError || new Error('Failed to generate match analysis');
+      }
+
+      aiAnalysisCache.set(matchId, { analysis: responseText, timestamp: Date.now() });
+
+      res.json({
+        success: true,
+        matchId,
+        analysis: responseText,
+        model: usedModel,
+        cached: false,
+        timestamp: Date.now()
+      });
+    } catch (error: any) {
+      console.error('Error generating AI match analysis:', error);
+      res.status(500).json({
+        error: error.message || 'Error generating AI match analysis'
+      });
+    }
+  });
+
+  // GET endpoint: Check if AI analysis is already cached
+  app.get('/api/match/:matchId/ai-analysis', (req, res) => {
+    const matchId = String(req.params.matchId || '');
+    if (aiAnalysisCache.has(matchId)) {
+      const cached = aiAnalysisCache.get(matchId)!;
+      return res.json({
+        success: true,
+        matchId,
+        analysis: cached.analysis,
+        cached: true,
+        timestamp: cached.timestamp
+      });
+    }
+    return res.json({ success: false, cached: false });
   });
 
   // Vite middleware for development

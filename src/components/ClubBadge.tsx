@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { resolveClub, getVerifiedBadgeUrl } from '../data/clubs';
+import { resolvePrimeiraLigaClub, getPrimeiraLigaBadgeUrl } from '../data/primeiraLigaClubs';
 
 interface ClubBadgeProps {
   name?: string;
@@ -18,11 +19,12 @@ export const ClubBadge: React.FC<ClubBadgeProps> = ({
 }) => {
   const [hasError, setHasError] = useState(false);
 
-  // Resolve club data
+  // Resolve club data (Premier League or Primeira Liga)
   const resolved = resolveClub(name || id);
-  const effectiveUrl = badgeUrl || resolved?.badgeUrl || getVerifiedBadgeUrl(id || name);
-  const clubName = resolved?.name || name || 'Club';
-  const abbr = resolved?.abbr || (name ? name.substring(0, 3).toUpperCase() : 'PL');
+  const pResolved = !resolved ? resolvePrimeiraLigaClub(name ? String(name) : String(id)) : undefined;
+  const effectiveUrl = badgeUrl || resolved?.badgeUrl || pResolved?.badgeUrl || getVerifiedBadgeUrl(id || name);
+  const clubName = resolved?.name || pResolved?.name || name || 'Club';
+  const abbr = resolved?.abbr || pResolved?.shortName?.substring(0, 3).toUpperCase() || (name ? name.substring(0, 3).toUpperCase() : 'FC');
 
   const sizeClasses = {
     xs: 'w-4 h-4 text-[9px]',

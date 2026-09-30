@@ -1,3 +1,5 @@
+export type CompetitionId = 'epl' | 'primeira-liga';
+
 export interface Team {
   id: string;
   name: string;
@@ -188,6 +190,38 @@ export interface RankedTeamStat {
   value: number;
 }
 
+export interface PlayerLineupItem {
+  id: string;
+  name: string;
+  position?: string;
+  number?: number;
+  captain?: boolean;
+}
+
+export interface TeamLineup {
+  formation?: string;
+  starting: PlayerLineupItem[];
+  substitutes: PlayerLineupItem[];
+}
+
+export interface MatchLineups {
+  home: TeamLineup;
+  away: TeamLineup;
+}
+
+export interface MatchFullDetailsResponse {
+  success: boolean;
+  matchId: string;
+  fixture?: MatchFixture;
+  previousMeetings: PreviousMeeting[];
+  homeGoals: MatchGoal[];
+  awayGoals: MatchGoal[];
+  homeCards: MatchCardEvent[];
+  awayCards: MatchCardEvent[];
+  lineups?: MatchLineups;
+  error?: string;
+}
+
 export interface StatCategoryData<T> {
   category: string;
   categoryLabel: string;
@@ -205,3 +239,31 @@ export interface StatsOverviewResponse {
   teamCategories: Record<string, StatCategoryData<RankedTeamStat>>;
   error?: string;
 }
+
+export interface MatchweekScheduleInfo {
+  matchweek: number;
+  status: 'played' | 'live' | 'upcoming';
+  dateRange: string;
+  fullDateRange: string;
+  fromLabel?: string;
+  untilLabel?: string;
+  fromMillis?: number;
+  untilMillis?: number;
+  matchesCount: number;
+  isPlayed: boolean;
+  isUpcoming: boolean;
+  isToday: boolean;
+}
+
+export interface SeasonScheduleResponse {
+  success: boolean;
+  seasonSlug: string;
+  seasonLabel: string;
+  recommendedMatchweek: number;
+  hasMatchToday: boolean;
+  todayMatchweek: number | null;
+  lastPlayedMatchweek: number | null;
+  matchweeks: MatchweekScheduleInfo[];
+  error?: string;
+}
+

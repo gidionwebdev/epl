@@ -1,6 +1,51 @@
-import { ScrapeResponse, MatchPreview, StandingsResponse, StatsOverviewResponse } from '../types';
+import { ScrapeResponse, MatchPreview, StandingsResponse, StatsOverviewResponse, MatchFullDetailsResponse, SeasonScheduleResponse } from '../types';
 import { ALL_SEASONS, findSeasonBySlug } from '../data/seasons';
 import { getFallbackStandings, getFallbackStatsOverview } from '../data/canonicalStats';
+
+export async function fetchSeasonMatchweeks(seasonSlug: string): Promise<SeasonScheduleResponse> {
+  try {
+    const res = await fetch(`/api/season-matchweeks?season=${encodeURIComponent(seasonSlug)}`);
+    if (res.ok) {
+      const data: SeasonScheduleResponse = await res.json();
+      if (data && data.success && Array.isArray(data.matchweeks) && data.matchweeks.length > 0) {
+        return data;
+      }
+    }
+  } catch (err) {
+    console.warn('Backend /api/season-matchweeks request failed:', err);
+  }
+
+  // Fallback client generation
+  const season = findSeasonBySlug(seasonSlug);
+  const maxMws = season.maxMatchweeks || 38;
+  const matchweeks = Array.from({ length: maxMws }, (_, i) => {
+    const mw = i + 1;
+    const isPlayed = !season.isCurrent || mw <= 5;
+    return {
+      matchweek: mw,
+      status: isPlayed ? ('played' as const) : ('upcoming' as const),
+      dateRange: `MW ${mw}`,
+      fullDateRange: `Matchweek ${mw}`,
+      matchesCount: 10,
+      isPlayed,
+      isUpcoming: !isPlayed,
+      isToday: false
+    };
+  });
+
+  const lastPlayed = matchweeks.filter((m) => m.isPlayed).pop();
+
+  return {
+    success: true,
+    seasonSlug,
+    seasonLabel: season.label,
+    recommendedMatchweek: lastPlayed ? lastPlayed.matchweek : 1,
+    hasMatchToday: false,
+    todayMatchweek: null,
+    lastPlayedMatchweek: lastPlayed ? lastPlayed.matchweek : null,
+    matchweeks
+  };
+}
 
 export async function fetchStatsOverview(seasonSlug: string, category?: string, type?: 'player' | 'team' | 'all'): Promise<StatsOverviewResponse> {
   const params = new URLSearchParams();
@@ -286,4 +331,156 @@ export async function fetchMatchPreview(matchId: string): Promise<MatchPreview |
   }
 
   return null;
+}
+
+export async function fetchMatchFullDetails(matchId: string): Promise<MatchFullDetailsResponse | null> {
+  try {
+    const res = await fetch(`/api/match-details?matchId=${matchId}`);
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (err) {
+    console.warn('Backend match full details request failed:', err);
+  }
+
+  // Fallback: try match preview if full details endpoint failed
+  try {
+    const preview = await fetchMatchPreview(matchId);
+    if (preview) {
+      return {
+        success: true,
+        matchId,
+        previousMeetings: preview.previousMeetings || [],
+        homeGoals: preview.homeGoals || [],
+        awayGoals: preview.awayGoals || [],
+        homeCards: preview.homeCards || [],
+        awayCards: preview.awayCards || []
+      };
+    }
+  } catch (e) {
+    console.error('Fallback preview failed:', e);
+  }
+
+  return null;
+}
+
+export async function fetchPrimeiraLigaMatchweeks(): Promise<SeasonScheduleResponse> {
+  try {
+    const res = await fetch('/api/primeira-liga/season-matchweeks');
+    if (res.ok) {
+      const data: SeasonScheduleResponse = await res.json();
+      if (data && data.success && Array.isArray(data.matchweeks) && data.matchweeks.length > 0) {
+        return data;
+      }
+    }
+  } catch (err) {
+    console.warn('Backend /api/primeira-liga/season-matchweeks failed:', err);
+  }
+
+  // Fallback
+  const matchweeks = Array.from({ length: 34 }, (_, i) => {
+    const mw = i + 1;
+    const isPlayed = mw <= 7;
+    return {
+      matchweek: mw,
+      status: isPlayed ? ('played' as const) : ('upcoming' as const),
+      dateRange: `Jornada ${mw}`,
+      fullDateRange: `Jornada ${mw}`,
+      matchesCount: 9,
+      isPlayed,
+      isUpcoming: !isPlayed,
+      isToday: false
+    };
+  });
+
+  return {
+    success: true,
+    seasonSlug: '2026-27',
+    seasonLabel: '2026/27',
+    recommendedMatchweek: 7,
+    hasMatchToday: false,
+    todayMatchweek: null,
+    lastPlayedMatchweek: 7,
+    matchweeks
+  };
+}
+
+export async function fetchPrimeiraLigaMatches(jornada: number): Promise<ScrapeResponse> {
+  try {
+    const res = await fetch(`/api/primeira-liga/matches?jornada=${jornada}`);
+    if (res.ok) {
+      const data: ScrapeResponse = await res.json();
+      if (data && Array.isArray(data.matches)) {
+        return data;
+      }
+    }
+  } catch (err) {
+    console.warn('Backend /api/primeira-liga/matches failed:', err);
+  }
+
+  return {
+    success: true,
+    targetUrl: 'https://www.bbc.com/sport/football/portuguese-primeira-liga/scores-fixtures',
+    scrapedAt: new Date().toISOString(),
+    seasonId: '2026-27',
+    seasonLabel: '2026/27',
+    compSeasonId: 94,
+    matchweekId: jornada,
+    maxMatchweeks: 34,
+    totalMatches: 0,
+    htmlMeta: {
+      title: `Portuguese Primeira Liga Jornada ${jornada} Fixtures & Results`,
+      description: `Primeira Liga scores and fixtures for Jornada ${jornada}`,
+      canonicalUrl: 'https://www.bbc.com/sport/football/portuguese-primeira-liga/scores-fixtures'
+    },
+    matches: []
+  };
+}
+
+export async function fetchPrimeiraLigaTable(): Promise<StandingsResponse> {
+  try {
+    const res = await fetch('/api/primeira-liga/table');
+    if (res.ok) {
+      const data: StandingsResponse = await res.json();
+      if (data && Array.isArray(data.entries) && data.entries.length > 0) {
+        return data;
+      }
+    }
+  } catch (err) {
+    console.warn('Backend /api/primeira-liga/table failed:', err);
+  }
+
+  return {
+    success: true,
+    targetUrl: 'https://www.bbc.com/sport/football/portuguese-primeira-liga/table',
+    seasonId: '2026-27',
+    seasonLabel: '2026/27',
+    compSeasonId: 94,
+    matchweekId: 'all',
+    entries: []
+  };
+}
+
+export async function fetchPrimeiraLigaStats(): Promise<StatsOverviewResponse> {
+  try {
+    const res = await fetch('/api/primeira-liga/stats');
+    if (res.ok) {
+      const data: StatsOverviewResponse = await res.json();
+      if (data && Object.keys(data.playerCategories || {}).length > 0) {
+        return data;
+      }
+    }
+  } catch (err) {
+    console.warn('Backend /api/primeira-liga/stats failed:', err);
+  }
+
+  return {
+    success: true,
+    targetUrl: 'https://www.bbc.com/sport/football/portuguese-primeira-liga',
+    seasonId: '2026-27',
+    seasonLabel: '2026/27',
+    compSeasonId: 94,
+    playerCategories: {},
+    teamCategories: {}
+  };
 }

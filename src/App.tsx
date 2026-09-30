@@ -13,32 +13,64 @@ import {
 } from 'lucide-react';
 import { Header } from './components/Header';
 import { MatchCard } from './components/MatchCard';
-import { MatchDetailsModal } from './components/MatchDetailsModal';
 import { StatsOverview } from './components/StatsOverview';
 import { MatchweekSelector } from './components/MatchweekSelector';
 import { LeagueTable } from './components/LeagueTable';
 import { PremierLeagueStats } from './components/PremierLeagueStats';
-import { MatchFixture, ScrapeResponse, StandingsResponse, StatsOverviewResponse } from './types';
-import { fetchMatchweekMatches, fetchLeagueTable, fetchStatsOverview } from './services/scraper';
+import { MatchDetailsPage } from './components/MatchDetailsPage';
+import { HomeScreen } from './components/HomeScreen';
+import { MatchFixture, ScrapeResponse, StandingsResponse, StatsOverviewResponse, SeasonScheduleResponse } from './types';
+import {
+  fetchMatchweekMatches,
+  fetchLeagueTable,
+  fetchStatsOverview,
+  fetchSeasonMatchweeks,
+  fetchPrimeiraLigaMatchweeks,
+  fetchPrimeiraLigaMatches,
+  fetchPrimeiraLigaTable,
+  fetchPrimeiraLigaStats
+} from './services/scraper';
 import { findSeasonBySlug } from './data/seasons';
 
+function parseRoute(pathname: string): { view: 'home' | 'match'; matchId?: string } {
+  const cleanPath = pathname.replace(/\/+$/, '') || '/';
+  const matchPattern = cleanPath.match(/^\/(?:match|matches|h2h)\/([a-zA-Z0-9_-]+)/);
+  if (matchPattern) {
+    return { view: 'match', matchId: matchPattern[1] };
+  }
+  return { view: 'home' };
+}
+
 export default function App() {
+  const [currentRoute, setCurrentRoute] = useState<{ view: 'home' | 'match'; matchId?: string }>(() =>
+    parseRoute(typeof window !== 'undefined' ? window.location.pathname : '/')
+  );
+  const [currentLeague, setCurrentLeague] = useState<'home' | 'epl' | 'primeira-liga'>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const l = params.get('league');
+      if (l === 'primeira-liga' || l === 'epl') return l;
+    }
+    return 'home';
+  });
+
   const [activeTab, setActiveTab] = useState<'fixtures' | 'table' | 'stats'>('fixtures');
   const [selectedSeasonSlug, setSelectedSeasonSlug] = useState<string>('2026-27');
-  const [selectedMatchweek, setSelectedMatchweek] = useState<number>(3);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [selectedMatchweek, setSelectedMatchweek] = useState<number>(5);
+  const [seasonSchedule, setSeasonSchedule] = useState<SeasonScheduleResponse | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [scrapeData, setScrapeData] = useState<ScrapeResponse | null>(null);
 
   // Table State
   const [tableData, setTableData] = useState<StandingsResponse | null>(null);
-  const [tableMatchweek, setTableMatchweek] = useState<number | 'all'>(3);
-  const [tableLoading, setTableLoading] = useState<boolean>(true);
+  const [tableMatchweek, setTableMatchweek] = useState<number | 'all'>(5);
+  const [tableLoading, setTableLoading] = useState<boolean>(false);
   const [tableError, setTableError] = useState<string | null>(null);
 
   // Stats State
   const [statsData, setStatsData] = useState<StatsOverviewResponse | null>(null);
-  const [statsLoading, setStatsLoading] = useState<boolean>(true);
+  const [statsLoading, setStatsLoading] = useState<boolean>(false);
   const [statsError, setStatsError] = useState<string | null>(null);
 
   // Filter and view state for fixtures
@@ -60,6 +92,24 @@ export default function App() {
       setError(err.message || 'Failed to load fixtures for the selected season and matchweek.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadSeasonSchedule = async (seasonSlug: string, requestedMw?: number) => {
+    setLoading(true);
+    try {
+      const schedule = await fetchSeasonMatchweeks(seasonSlug);
+      setSeasonSchedule(schedule);
+
+      const mwToLoad = requestedMw || schedule.recommendedMatchweek || 1;
+      setSelectedMatchweek(mwToLoad);
+      setTableMatchweek(mwToLoad);
+      loadMatches(seasonSlug, mwToLoad);
+    } catch (e) {
+      console.warn('Failed to load season schedule:', e);
+      const fallbackMw = requestedMw || 1;
+      setSelectedMatchweek(fallbackMw);
+      loadMatches(seasonSlug, fallbackMw);
     }
   };
 
@@ -91,34 +141,131 @@ export default function App() {
     }
   };
 
-  useEffect(() => {
-    loadMatches(selectedSeasonSlug, selectedMatchweek);
-    loadTable(selectedSeasonSlug, tableMatchweek);
-    loadStats(selectedSeasonSlug);
-  }, []);
+  const loadPrimeiraLigaData = async (requestedJornada?: number) => {
+    setLoading(true);
+    setTableLoading(true);
+    setStatsLoading(true);
+    setError(null);
+    setTableError(null);
+    setStatsError(null);
 
-  const handleMatchweekChange = (mwNumber: number) => {
-    setSelectedMatchweek(mwNumber);
-    loadMatches(selectedSeasonSlug, mwNumber);
+    try {
+      const schedule = await fetchPrimeiraLigaMatchweeks();
+      setSeasonSchedule(schedule);
+      const jToLoad = requestedJornada || schedule.recommendedMatchweek || 7;
+      setSelectedMatchweek(jToLoad);
+      setTableMatchweek(jToLoad);
+
+      const [matchesRes, tableRes, statsRes] = await Promise.all([
+        fetchPrimeiraLigaMatches(jToLoad),
+        fetchPrimeiraLigaTable(),
+        fetchPrimeiraLigaStats()
+      ]);
+
+      setScrapeData(matchesRes);
+      setTableData(tableRes);
+      setStatsData(statsRes);
+    } catch (err: any) {
+      console.error('Failed to load Primeira Liga data:', err);
+      setError(err.message || 'Failed to load Portuguese Primeira Liga data.');
+    } finally {
+      setLoading(false);
+      setTableLoading(false);
+      setStatsLoading(false);
+    }
   };
 
-  const handleSeasonChange = (seasonSlug: string) => {
-    const seasonInfo = findSeasonBySlug(seasonSlug);
-    let targetMw = selectedMatchweek;
-    if (targetMw > seasonInfo.maxMatchweeks) {
-      targetMw = 1;
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const l = params.get('league');
+
+    if (l === 'primeira-liga') {
+      setCurrentLeague('primeira-liga');
+      loadPrimeiraLigaData();
+    } else if (l === 'epl') {
+      setCurrentLeague('epl');
+      loadSeasonSchedule(selectedSeasonSlug);
+      loadTable(selectedSeasonSlug, tableMatchweek);
+      loadStats(selectedSeasonSlug);
     }
-    setSelectedSeasonSlug(seasonSlug);
-    setSelectedMatchweek(targetMw);
-    loadMatches(seasonSlug, targetMw);
 
-    // Also update table for this season
-    const targetTableMw = tableMatchweek === 'all' ? 'all' : (typeof tableMatchweek === 'number' && tableMatchweek > seasonInfo.maxMatchweeks ? 1 : tableMatchweek);
-    setTableMatchweek(targetTableMw);
-    loadTable(seasonSlug, targetTableMw);
+    const handlePopState = () => {
+      setCurrentRoute(parseRoute(window.location.pathname));
+      const p2 = new URLSearchParams(window.location.search);
+      const l2 = p2.get('league');
+      if (l2 === 'primeira-liga' || l2 === 'epl') {
+        setCurrentLeague(l2);
+      } else if (!window.location.pathname.startsWith('/match')) {
+        setCurrentLeague('home');
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
-    // Also update stats for this season
-    loadStats(seasonSlug);
+  const handleSelectLeague = (league: 'epl' | 'primeira-liga') => {
+    setCurrentLeague(league);
+    const url = new URL(window.location.href);
+    url.searchParams.set('league', league);
+    window.history.pushState(null, '', url.toString());
+
+    if (league === 'primeira-liga') {
+      loadPrimeiraLigaData();
+    } else {
+      loadSeasonSchedule(selectedSeasonSlug);
+      loadTable(selectedSeasonSlug, tableMatchweek);
+      loadStats(selectedSeasonSlug);
+    }
+  };
+
+  const handleOpenHomeScreen = () => {
+    setCurrentLeague('home');
+    const url = new URL(window.location.href);
+    url.searchParams.delete('league');
+    window.history.pushState(null, '', url.toString());
+  };
+
+  const handleSeasonChange = (newSeasonSlug: string) => {
+    if (currentLeague === 'primeira-liga') return;
+    setSelectedSeasonSlug(newSeasonSlug);
+    loadSeasonSchedule(newSeasonSlug);
+    loadTable(newSeasonSlug, 'all');
+    loadStats(newSeasonSlug);
+  };
+
+  const handleMatchweekChange = (newMw: number) => {
+    setSelectedMatchweek(newMw);
+    setTableMatchweek(newMw);
+    if (currentLeague === 'primeira-liga') {
+      setLoading(true);
+      fetchPrimeiraLigaMatches(newMw).then((data) => {
+        setScrapeData(data);
+        setLoading(false);
+      });
+    } else {
+      loadMatches(selectedSeasonSlug, newMw);
+    }
+  };
+
+  const navigateToMatch = (matchId: string, match?: MatchFixture) => {
+    if (match) {
+      setSelectedMatch(match);
+    }
+    const targetUrl = `/match/${matchId}`;
+    if (window.location.pathname !== targetUrl) {
+      window.history.pushState(null, '', targetUrl);
+    }
+    setCurrentRoute({ view: 'match', matchId });
+  };
+
+  const navigateToHome = (tab?: 'fixtures' | 'table' | 'stats') => {
+    if (tab) {
+      setActiveTab(tab);
+    }
+    if (window.location.pathname !== '/') {
+      window.history.pushState(null, '', '/');
+    }
+    setCurrentRoute({ view: 'home' });
   };
 
   const handleTableMatchweekChange = (mw: number | 'all') => {
@@ -127,7 +274,11 @@ export default function App() {
   };
 
   const handleTabChange = (tab: 'fixtures' | 'table' | 'stats') => {
-    setActiveTab(tab);
+    if (currentRoute.view === 'match') {
+      navigateToHome(tab);
+    } else {
+      setActiveTab(tab);
+    }
     if (tab === 'table' && !tableData) {
       loadTable(selectedSeasonSlug, tableMatchweek);
     }
@@ -162,15 +313,19 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-[#00ff85] selection:text-[#38003c]">
-      {/* Clean Premier League Header */}
+      {/* Header */}
       <Header
         onRefresh={() => {
-          if (activeTab === 'fixtures') {
-            loadMatches(selectedSeasonSlug, selectedMatchweek);
-          } else if (activeTab === 'table') {
-            loadTable(selectedSeasonSlug, tableMatchweek);
+          if (currentLeague === 'primeira-liga') {
+            loadPrimeiraLigaData(selectedMatchweek);
           } else {
-            loadStats(selectedSeasonSlug);
+            if (activeTab === 'fixtures') {
+              loadMatches(selectedSeasonSlug, selectedMatchweek);
+            } else if (activeTab === 'table') {
+              loadTable(selectedSeasonSlug, tableMatchweek);
+            } else {
+              loadStats(selectedSeasonSlug);
+            }
           }
         }}
         loading={activeTab === 'fixtures' ? loading : activeTab === 'table' ? tableLoading : statsLoading}
@@ -179,11 +334,28 @@ export default function App() {
         statsData={statsData}
         activeTab={activeTab}
         onTabChange={handleTabChange}
+        currentLeague={currentLeague === 'home' ? 'epl' : currentLeague}
+        onLeagueChange={handleSelectLeague}
+        onOpenHomeScreen={handleOpenHomeScreen}
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8">
-        {/* TAB 1: STATS & LEADERBOARDS */}
+      {currentRoute.view === 'match' && currentRoute.matchId ? (
+        <MatchDetailsPage
+          matchId={currentRoute.matchId}
+          initialMatch={
+            selectedMatch && selectedMatch.matchId === currentRoute.matchId
+              ? selectedMatch
+              : scrapeData?.matches?.find((m) => m.matchId === currentRoute.matchId) || null
+          }
+          onBack={() => navigateToHome('fixtures')}
+          onNavigateMatch={(id) => navigateToMatch(id)}
+        />
+      ) : currentLeague === 'home' ? (
+        <HomeScreen onSelectLeague={handleSelectLeague} />
+      ) : (
+        <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8">
+          {/* TAB 1: STATS & LEADERBOARDS */}
         {activeTab === 'stats' && (
           <div>
             {statsError && (
@@ -258,6 +430,10 @@ export default function App() {
               playedMatchesCount={playedCount}
               maxMatchweeks={scrapeData?.maxMatchweeks || findSeasonBySlug(selectedSeasonSlug).maxMatchweeks}
               loading={loading}
+              scheduleInfo={seasonSchedule?.matchweeks || []}
+              recommendedMatchweek={seasonSchedule?.recommendedMatchweek}
+              hasMatchToday={seasonSchedule?.hasMatchToday}
+              lastPlayedMatchweek={seasonSchedule?.lastPlayedMatchweek}
             />
 
             {/* Error notification */}
@@ -424,7 +600,7 @@ export default function App() {
                             key={match.matchId}
                             match={match}
                             index={idx}
-                            onSelectMatch={(m) => setSelectedMatch(m)}
+                            onSelectMatch={(m) => navigateToMatch(m.matchId, m)}
                           />
                         ))}
                       </div>
@@ -510,13 +686,18 @@ export default function App() {
                                   {m.ground}
                                 </td>
                                 <td className="py-3 px-4 text-right">
-                                  <button
-                                    type="button"
-                                    onClick={() => setSelectedMatch(m)}
-                                    className="px-2.5 py-1 text-xs font-semibold text-[#38003c] bg-purple-50 hover:bg-[#38003c] hover:text-white rounded-lg transition border border-purple-200 cursor-pointer"
+                                  <a
+                                    href={`/match/${m.matchId}`}
+                                    onClick={(e) => {
+                                      if (!e.ctrlKey && !e.metaKey && e.button === 0) {
+                                        e.preventDefault();
+                                        navigateToMatch(m.matchId, m);
+                                      }
+                                    }}
+                                    className="inline-block px-2.5 py-1 text-xs font-semibold text-[#38003c] bg-purple-50 hover:bg-[#38003c] hover:text-white rounded-lg transition border border-purple-200 cursor-pointer"
                                   >
                                     {hasScore ? 'Result & H2H' : 'H2H History'}
-                                  </button>
+                                  </a>
                                 </td>
                               </tr>
                             );
@@ -531,12 +712,7 @@ export default function App() {
           </div>
         )}
       </main>
-
-      {/* Match Details & H2H Modal */}
-      <MatchDetailsModal
-        match={selectedMatch}
-        onClose={() => setSelectedMatch(null)}
-      />
+      )}
 
       {/* Footer */}
       <footer className="mt-auto border-t border-slate-200 bg-white py-6 text-xs text-slate-500">

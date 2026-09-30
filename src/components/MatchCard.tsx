@@ -331,15 +331,21 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, index, onSelectMatc
           ID: {match.matchId}
         </span>
 
-        <button
+        <a
           id={`btn-view-h2h-${match.matchId}`}
-          type="button"
-          onClick={() => onSelectMatch(match)}
-          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white hover:bg-[#38003c] text-[#38003c] hover:text-white font-semibold text-xs border border-slate-200 hover:border-[#38003c] transition shadow-2xs cursor-pointer"
+          href={`/match/${match.matchId}`}
+          onClick={(e) => {
+            // Allow middle click / ctrl+click to open new tab, otherwise use client-side navigation
+            if (!e.ctrlKey && !e.metaKey && e.button === 0) {
+              e.preventDefault();
+              onSelectMatch(match);
+            }
+          }}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-[#38003c] text-[#38003c] hover:text-white font-semibold text-xs border border-slate-200 hover:border-[#38003c] transition shadow-2xs cursor-pointer group/btn"
         >
-          <History className="w-3.5 h-3.5 text-emerald-600 group-hover:text-[#00ff85]" />
+          <History className="w-3.5 h-3.5 text-emerald-600 group-hover/btn:text-[#00ff85]" />
           <span>{isFinished ? 'Match Details & H2H' : 'Head-to-Head'}</span>
-        </button>
+        </a>
       </div>
     </div>
   );
