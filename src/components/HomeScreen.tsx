@@ -165,12 +165,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onSelectLeague }) => {
                 </span>
                 <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
                   <Flame className="w-3 h-3 text-amber-600" />
-                  Live BBC Sport Feed
+                  ligaportugal.pt/calendar
                 </span>
               </div>
 
               <p className="text-sm text-slate-600 leading-relaxed mb-5">
-                Live scores, fixtures, and full standings directly sourced from BBC Sport. Includes round-by-round date tracking, goal events, and Gemini AI tactical previews.
+                Official Liga Portugal Betclic calendar & live match scores. Includes round-by-round Jornada date tracking, goal events, full standings table, and Gemini AI tactical previews.
               </p>
 
               {/* Sample Club Badges */}

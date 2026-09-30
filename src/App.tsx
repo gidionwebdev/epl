@@ -428,12 +428,13 @@ export default function App() {
               onSeasonChange={handleSeasonChange}
               totalMatches={scrapeData?.totalMatches || 0}
               playedMatchesCount={playedCount}
-              maxMatchweeks={scrapeData?.maxMatchweeks || findSeasonBySlug(selectedSeasonSlug).maxMatchweeks}
+              maxMatchweeks={currentLeague === 'primeira-liga' ? 34 : scrapeData?.maxMatchweeks || findSeasonBySlug(selectedSeasonSlug).maxMatchweeks}
               loading={loading}
               scheduleInfo={seasonSchedule?.matchweeks || []}
               recommendedMatchweek={seasonSchedule?.recommendedMatchweek}
               hasMatchToday={seasonSchedule?.hasMatchToday}
               lastPlayedMatchweek={seasonSchedule?.lastPlayedMatchweek}
+              league={currentLeague === 'primeira-liga' ? 'primeira-liga' : 'epl'}
             />
 
             {/* Error notification */}
@@ -631,7 +632,12 @@ export default function App() {
                             const isAwayWon = hasScore && (m.awayTeam.score as number) > (m.homeTeam.score as number);
 
                             return (
-                              <tr key={m.matchId} className="hover:bg-purple-50/40 transition">
+                              <tr
+                                key={m.matchId}
+                                onClick={() => navigateToMatch(m.matchId, m)}
+                                className="hover:bg-purple-50/60 transition cursor-pointer group"
+                                title={`Click to view match details & AI analysis for ${m.homeTeam.name} vs ${m.awayTeam.name}`}
+                              >
                                 <td className="py-3 px-4 font-mono text-slate-400">{idx + 1}</td>
                                 <td className={`py-3 px-4 ${isHomeWon ? 'font-black text-slate-900' : 'font-semibold text-slate-700'}`}>
                                   <div className="flex items-center gap-2">

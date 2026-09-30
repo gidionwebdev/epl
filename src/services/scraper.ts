@@ -452,11 +452,15 @@ export async function fetchPrimeiraLigaTable(): Promise<StandingsResponse> {
 
   return {
     success: true,
-    targetUrl: 'https://www.bbc.com/sport/football/portuguese-primeira-liga/table',
+    targetUrl: 'https://www.ligaportugal.pt/calendar',
+    scrapedAt: new Date().toISOString(),
     seasonId: '2026-27',
     seasonLabel: '2026/27',
     compSeasonId: 94,
     matchweekId: 'all',
+    isAllMatchweeks: true,
+    maxMatchweeks: 34,
+    totalTeams: 18,
     entries: []
   };
 }

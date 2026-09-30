@@ -88,13 +88,31 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, index, onSelectMatc
 
   const { date, time } = formatKickoff(match.kickoff, match.kickoffTimezone);
 
+  const handleCardClick = (e: React.MouseEvent) => {
+    // If middle click or cmd/ctrl click, let browser handle if it was an anchor, otherwise navigate
+    if (e.ctrlKey || e.metaKey) return;
+    onSelectMatch(match);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onSelectMatch(match);
+    }
+  };
+
   return (
     <div
       id={`match-card-${match.matchId}`}
-      className={`bg-white rounded-xl border transition duration-200 flex flex-col justify-between overflow-hidden group shadow-2xs hover:shadow-md ${
+      onClick={handleCardClick}
+      onKeyDown={handleKeyDown}
+      tabIndex={0}
+      role="button"
+      aria-label={`View match details: ${match.homeTeam.name} vs ${match.awayTeam.name}`}
+      className={`bg-white rounded-2xl border transition-all duration-200 flex flex-col justify-between overflow-hidden group shadow-2xs hover:shadow-lg hover:scale-[1.01] cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#38003c] ${
         isFinished
           ? 'border-slate-200 hover:border-purple-300'
-          : 'border-slate-200 hover:border-emerald-300'
+          : 'border-slate-200 hover:border-emerald-400'
       }`}
     >
       {/* Card Header: Match number, status, date */}
